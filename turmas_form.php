@@ -1,6 +1,8 @@
-<?php 
+<?php
+
 require_once 'includes/db.php';
-include 'includes/header.php'; 
+include 'includes/header.php';
+
 
 $id = isset($_GET['id']) ? $_GET['id'] : null;
 $turma = ['nome' => '', 'curso_id' => '', 'data_inicio' => '', 'data_fim' => '', 'turno' => 'Matutino', 'cidade' => ''];
@@ -22,7 +24,7 @@ $cursos = $stmt_cursos->fetchAll();
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
     <h2><?php echo $id ? 'Editar Turma' : 'Nova Turma'; ?></h2>
-    <a href="turmas.php" class="btn" style="background: #6c757d; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;"><i class="fas fa-arrow-left"></i> Voltar</a>
+    <a href="turmas.php" class="btn" style="background: #6c757d; color: #fff;"><i class="fas fa-arrow-left"></i> Voltar</a>
 </div>
 
 <div class="card" style="max-width: 700px; margin: 0 auto;">
@@ -42,7 +44,8 @@ $cursos = $stmt_cursos->fetchAll();
                     <option value="<?php echo $c['id']; ?>" <?php echo $turma['curso_id'] == $c['id'] ? 'selected' : ''; ?>>
                         <?php echo htmlspecialchars($c['nome']); ?>
                     </option>
-                <?php endforeach; ?>
+                <?php
+endforeach; ?>
             </select>
         </div>
 

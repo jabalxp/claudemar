@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     if (!empty($conflitos)) {
         include 'includes/header.php';
-        ?>
+?>
         <div class="page-header">
             <h2><i class="fas fa-exclamation-triangle"></i> Falha no Planejamento</h2>
             <p>Foram detectados conflitos que impedem a geração automática da agenda.</p>
@@ -91,7 +91,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <i class="fas fa-calendar-times" style="color: var(--primary-red);"></i>
                             <span><?php echo htmlspecialchars($c); ?></span>
                         </div>
-                    <?php endforeach; ?>
+                    <?php
+        endforeach; ?>
                 </div>
             </div>
             
@@ -109,28 +110,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // No conflicts, proceed with Insertion using Transaction
     try {
         $pdo->beginTransaction();
-        
+
         $stmt_insert = $pdo->prepare("INSERT INTO agenda (turma_id, professor_id, sala_id, data, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?, ?)");
-        
+
         foreach ($aulas_para_inserir as $aula) {
             $stmt_insert->execute([
-                $aula['turma_id'], 
-                $aula['professor_id'], 
-                $aula['sala_id'], 
-                $aula['data'], 
-                $aula['hora_inicio'], 
+                $aula['turma_id'],
+                $aula['professor_id'],
+                $aula['sala_id'],
+                $aula['data'],
+                $aula['hora_inicio'],
                 $aula['hora_fim']
             ]);
         }
-        
+
         $pdo->commit();
         header("Location: index.php?msg=agenda_generated&count=" . count($aulas_para_inserir));
-    } catch (Exception $e) {
+    }
+    catch (Exception $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
         include 'includes/header.php';
-        ?>
+?>
         <div class="card">
             <h3 style="color: var(--primary-red);">Erro ao salvar agenda</h3>
             <p><?php echo htmlspecialchars($e->getMessage()); ?></p>

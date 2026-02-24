@@ -1,6 +1,8 @@
-<?php 
+<?php
+
 require_once 'includes/db.php';
-include 'includes/header.php'; 
+include 'includes/header.php';
+
 
 $id = isset($_GET['id']) ? $_GET['id'] : null;
 $sala = ['nome' => '', 'tipo' => 'Teórica', 'capacidade' => ''];
@@ -16,7 +18,7 @@ if ($id) {
 }
 ?>
 
-<div class="page-header" style="margin-bottom: 20px;">
+<div class="page-header" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
     <h2><?php echo $id ? 'Editar Ambiente' : 'Novo Ambiente'; ?></h2>
     <a href="salas.php" class="btn" style="background: #6c757d; color: #fff;"><i class="fas fa-arrow-left"></i> Voltar</a>
 </div>

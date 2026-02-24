@@ -1,6 +1,8 @@
-<?php 
+<?php
+
 require_once 'includes/db.php';
-include 'includes/header.php'; 
+include 'includes/header.php';
+
 
 $id = isset($_GET['id']) ? $_GET['id'] : null;
 $curso = ['nome' => '', 'carga_horaria' => ''];

@@ -1,6 +1,8 @@
-<?php 
+<?php
+
 require_once 'includes/db.php';
-include 'includes/header.php'; 
+include 'includes/header.php';
+
 
 $id = isset($_GET['id']) ? $_GET['id'] : null;
 $prof = ['nome' => '', 'especialidade' => '', 'email' => '', 'cor_agenda' => '#ed1c24'];
@@ -16,7 +18,7 @@ if ($id) {
 }
 ?>
 
-<div class="page-header" style="margin-bottom: 20px;">
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
     <h2><?php echo $id ? 'Editar Professor' : 'Novo Professor'; ?></h2>
     <a href="professores.php" class="btn" style="background: #6c757d; color: #fff;"><i class="fas fa-arrow-left"></i> Voltar</a>
 </div>
