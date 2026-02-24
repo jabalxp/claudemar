@@ -18,14 +18,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $data_inicio = $_POST['data_inicio'];
     $data_fim = $_POST['data_fim'];
     $turno = $_POST['turno'];
+    $cidade = !empty($_POST['cidade']) ? $_POST['cidade'] : null;
 
     if ($id) {
-        $stmt = $pdo->prepare("UPDATE turmas SET nome = ?, curso_id = ?, data_inicio = ?, data_fim = ?, turno = ? WHERE id = ?");
-        $stmt->execute([$nome, $curso_id, $data_inicio, $data_fim, $turno, $id]);
+        $stmt = $pdo->prepare("UPDATE turmas SET nome = ?, curso_id = ?, data_inicio = ?, data_fim = ?, turno = ?, cidade = ? WHERE id = ?");
+        $stmt->execute([$nome, $curso_id, $data_inicio, $data_fim, $turno, $cidade, $id]);
         header("Location: turmas.php?msg=updated");
     } else {
-        $stmt = $pdo->prepare("INSERT INTO turmas (nome, curso_id, data_inicio, data_fim, turno) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$nome, $curso_id, $data_inicio, $data_fim, $turno]);
+        $stmt = $pdo->prepare("INSERT INTO turmas (nome, curso_id, data_inicio, data_fim, turno, cidade) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$nome, $curso_id, $data_inicio, $data_fim, $turno, $cidade]);
         header("Location: turmas.php?msg=created");
     }
     exit;

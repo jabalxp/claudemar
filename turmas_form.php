@@ -3,7 +3,7 @@ require_once 'includes/db.php';
 include 'includes/header.php'; 
 
 $id = isset($_GET['id']) ? $_GET['id'] : null;
-$turma = ['nome' => '', 'curso_id' => '', 'data_inicio' => '', 'data_fim' => '', 'turno' => 'Matutino'];
+$turma = ['nome' => '', 'curso_id' => '', 'data_inicio' => '', 'data_fim' => '', 'turno' => 'Matutino', 'cidade' => ''];
 
 if ($id) {
     $stmt = $pdo->prepare("SELECT * FROM turmas WHERE id = ?");
@@ -20,9 +20,9 @@ $stmt_cursos = $pdo->query("SELECT id, nome FROM cursos ORDER BY nome ASC");
 $cursos = $stmt_cursos->fetchAll();
 ?>
 
-<div class="page-header" style="margin-bottom: 20px;">
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
     <h2><?php echo $id ? 'Editar Turma' : 'Nova Turma'; ?></h2>
-    <a href="turmas.php" class="btn" style="background: #6c757d; color: #fff;"><i class="fas fa-arrow-left"></i> Voltar</a>
+    <a href="turmas.php" class="btn" style="background: #6c757d; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;"><i class="fas fa-arrow-left"></i> Voltar</a>
 </div>
 
 <div class="card" style="max-width: 700px; margin: 0 auto;">
@@ -57,13 +57,20 @@ $cursos = $stmt_cursos->fetchAll();
             </div>
         </div>
 
-        <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Turno Definado</label>
-            <select name="turno" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
-                <option value="Matutino" <?php echo $turma['turno'] == 'Matutino' ? 'selected' : ''; ?>>Matutino</option>
-                <option value="Vespertino" <?php echo $turma['turno'] == 'Vespertino' ? 'selected' : ''; ?>>Vespertino</option>
-                <option value="Noturno" <?php echo $turma['turno'] == 'Noturno' ? 'selected' : ''; ?>>Noturno</option>
-            </select>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Turno Definido</label>
+                <select name="turno" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+                    <option value="Matutino" <?php echo $turma['turno'] == 'Matutino' ? 'selected' : ''; ?>>Matutino</option>
+                    <option value="Vespertino" <?php echo $turma['turno'] == 'Vespertino' ? 'selected' : ''; ?>>Vespertino</option>
+                    <option value="Noturno" <?php echo $turma['turno'] == 'Noturno' ? 'selected' : ''; ?>>Noturno</option>
+                </select>
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Cidade (Classe Descentralizada)</label>
+                <input type="text" name="cidade" value="<?php echo htmlspecialchars($turma['cidade'] ?? ''); ?>" placeholder="Ex: Manaus, Itacoatiara, Parintins..." style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+                <small style="color: var(--text-muted); font-size: 0.8rem;">Deixe em branco para turmas na sede principal.</small>
+            </div>
         </div>
 
         <div style="text-align: right;">

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS turmas (
     data_inicio DATE,
     data_fim DATE,
     turno ENUM('Matutino', 'Vespertino', 'Noturno'),
+    cidade VARCHAR(100) DEFAULT NULL,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

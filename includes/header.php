@@ -79,7 +79,7 @@ $theme = isset($_COOKIE['theme']) ? $_COOKIE['theme'] : 'light';
                     <button id="theme-toggle" title="Alternar Tema">
                         <i class="fas <?php echo $theme == 'dark' ? 'fa-sun' : 'fa-moon'; ?>"></i>
                     </button>
-                    <span>Olá, <strong>Célia</strong></span>
+                    <span>Olá, <strong>Beneguiguiris</strong></span>
                     <div class="avatar" style="width: 35px; height: 35px; border-radius: 50%; background: #ccc; display: flex; align-items: center; justify-content: center;">
                         <i class="fas fa-user"></i>
                     </div>
