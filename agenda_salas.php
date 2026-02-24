@@ -9,7 +9,7 @@ $sala_id = isset($_GET['sala_id']) ? $_GET['sala_id'] : null;
 // Get Monday of the week
 $monday = date('Y-m-d', strtotime('monday this week', strtotime($view_date)));
 $week_days = [];
-for($i=0; $i<6; $i++) {
+for ($i = 0; $i < 6; $i++) {
     $date = date('Y-m-d', strtotime("$monday +$i days"));
     $week_days[$date] = [
         'name' => ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][$i],
@@ -32,7 +32,7 @@ if ($sala_id) {
     ");
     $stmt->execute([$sala_id, $monday, $sunday]);
     $aulas = $stmt->fetchAll();
-    
+
     // Group by date
     $agenda_data = [];
     foreach ($aulas as $aula) {
@@ -50,7 +50,8 @@ if ($sala_id) {
                 <option value="<?php echo $s['id']; ?>" <?php echo $sala_id == $s['id'] ? 'selected' : ''; ?>>
                     <?php echo htmlspecialchars($s['nome']); ?>
                 </option>
-            <?php endforeach; ?>
+            <?php
+endforeach; ?>
         </select>
     </div>
 </div>
@@ -81,21 +82,27 @@ if ($sala_id) {
                         <i class="fas fa-user"></i> <?php echo htmlspecialchars($a['professor_nome']); ?>
                     </div>
                 </div>
-                <?php endforeach; ?>
-            <?php else: ?>
+                <?php
+            endforeach; ?>
+            <?php
+        else: ?>
                 <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.8rem; border: 1px dashed var(--border-color); border-radius: 8px;">
                     Ambiente Livre
                 </div>
-            <?php endif; ?>
+            <?php
+        endif; ?>
         </div>
     </div>
-    <?php endforeach; ?>
+    <?php
+    endforeach; ?>
 </div>
-<?php else: ?>
+<?php
+else: ?>
     <div class="card" style="text-align: center; padding: 100px;">
         <i class="fas fa-door-open" style="font-size: 3rem; color: var(--border-color); margin-bottom: 20px;"></i>
         <h3>Selecione um ambiente para visualizar a ocupação semanal.</h3>
     </div>
-<?php endif; ?>
+<?php
+endif; ?>
 
 <?php include 'includes/footer.php'; ?>

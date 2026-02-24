@@ -15,7 +15,7 @@ if ($is_agenda) {
         SELECT
             a.data              AS data,
             a.hora_inicio       AS hora_inicio,
-            a.hora_fim          AS hora_fim,
+            a.hora_fom          AS hora_fim,
             t.nome              AS turma,
             t.turno             AS turno,
             COALESCE(t.cidade, 'Sede') AS cidade,
@@ -57,10 +57,8 @@ else {
 
 $data = $stmt->fetchAll();
 
-if (empty($data)) {
-    header("Location: index.php?msg=nodata");
-    exit;
-}
+// If empty, we don't redirect yet; we show the headers.
+$has_data = !empty($data);
 
 // ─────────────────────────────────────────────
 // HEADER LABELS
@@ -111,95 +109,59 @@ $headers_powerbi = [
 ];
 
 $headers_map = $is_powerbi ? $headers_powerbi : $headers_excel;
-$cols = array_keys($data[0]);
+
+// Determine columns based on headers if data is empty
+if ($has_data) {
+    $cols = array_keys($data[0]);
+}
+else {
+    $cols = $is_agenda
+        ? ['data', 'hora_inicio', 'hora_fim', 'turma', 'turno', 'cidade', 'curso', 'professor', 'especialidade_professor', 'ambiente_sala', 'tipo_sala']
+        : ['id', 'turma', 'curso', 'carga_horaria_h', 'turno', 'cidade', 'data_inicio', 'data_fim', 'duracao_dias', 'total_aulas_agendadas', 'professores', 'ambientes_utilizados'];
+}
 
 // ─────────────────────────────────────────────
 // ROUTE TO GENERATOR
 // ─────────────────────────────────────────────
 
 if ($is_powerbi) {
-    // ── Power BI: robust CSV (semicolon, ISO dates, WITH BOM for Excel/PBI compatibility in BR) ──
-    $filename = $is_agenda
-        ? 'SENAI_Agenda_PowerBI_' . date('Y-m-d') . '.csv'
-        : 'SENAI_Turmas_PowerBI_' . date('Y-m-d') . '.csv';
-
+    $filename = $is_agenda ? 'SENAI_Agenda_PowerBI_' . date('Y-m-d') . '.csv' : 'SENAI_Turmas_PowerBI_' . date('Y-m-d') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Cache-Control: max-age=0');
 
     $out = fopen('php://output', 'w');
+    fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM UTF-8
 
-    // Add BOM for UTF-8 (Excel and Power BI in BR pattern love this)
-    fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
-
-    // Header row
     $header_row = [];
-    foreach ($cols as $c) {
+    foreach ($cols as $c)
         $header_row[] = $headers_map[$c] ?? $c;
-    }
-    // Using semicolon (;) as delimiter is safer for Brazilian regional settings
     fputcsv($out, $header_row, ';');
 
-    // Data rows
-    foreach ($data as $row) {
-        $line = [];
-        foreach ($cols as $c) {
-            $v = $row[$c] ?? '';
-            if (in_array($c, ['data', 'data_inicio', 'data_fim']) && $v) {
-                $v = date('Y-m-d', strtotime($v)); // ISO for Power BI
+    if ($has_data) {
+        foreach ($data as $row) {
+            $line = [];
+            foreach ($cols as $c) {
+                $v = $row[$c] ?? '';
+                if (in_array($c, ['data', 'data_inicio', 'data_fim']) && $v)
+                    $v = date('Y-m-d', strtotime($v));
+                if (in_array($c, ['hora_inicio', 'hora_fim']) && $v)
+                    $v = substr($v, 0, 5);
+                $line[] = $v;
             }
-            if (in_array($c, ['hora_inicio', 'hora_fim']) && $v) {
-                $v = substr($v, 0, 5);
-            }
-            $line[] = $v;
+            fputcsv($out, $line, ';');
         }
-        fputcsv($out, $line, ';');
     }
-
     fclose($out);
     exit;
 }
 
-// ─────────────────────────────────────────────
-// COLUMN WIDTHS (Excel)
-// ─────────────────────────────────────────────
-$col_widths = [
-    'id' => 50,
-    'turma' => 120,
-    'curso' => 200,
-    'carga_horaria_h' => 90,
-    'turno' => 90,
-    'cidade' => 130,
-    'data_inicio' => 90,
-    'data_fim' => 90,
-    'duracao_dias' => 80,
-    'total_aulas_agendadas' => 90,
-    'professores' => 200,
-    'ambientes_utilizados' => 160,
-    'data' => 90,
-    'hora_inicio' => 80,
-    'hora_fim' => 80,
-    'professor' => 170,
-    'especialidade_professor' => 160,
-    'ambiente_sala' => 140,
-    'tipo_sala' => 100,
-];
+// ── Excel: SpreadsheetML XML → .xls ──
+$sheet_name = $is_agenda ? 'Agenda' : 'Turmas';
+$filename = $is_agenda ? 'SENAI_Agenda_' . date('Y-m-d') . '.xls' : 'SENAI_Turmas_' . date('Y-m-d') . '.xls';
 
-// ── Excel: SpreadsheetML XML → .xls (beautifully formatted) ──
-$sheet_name = $is_agenda ? 'Agenda SENAI' : 'Turmas SENAI';
-$filename = $is_agenda
-    ? 'SENAI_Agenda_' . date('Y-m-d') . '.xls'
-    : 'SENAI_Turmas_' . date('Y-m-d') . '.xls';
 
 header('Content-Type: application/vnd.ms-excel; charset=utf-8');
 header('Content-Disposition: attachment; filename="' . $filename . '"');
-header('Cache-Control: max-age=0');
-
-// Helper to escape XML special chars
-function xe($v)
-{
-    return htmlspecialchars((string)$v, ENT_QUOTES | ENT_XML1, 'UTF-8');
-}
 
 echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
 echo '<?mso-application progid="Excel.Sheet"?>' . "\n";
@@ -209,15 +171,7 @@ echo '<?mso-application progid="Excel.Sheet"?>' . "\n";
   xmlns:x="urn:schemas-microsoft-com:office:excel"
   xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
   xmlns:html="http://www.w3.org/TR/REC-html40">
-
-  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
-    <Title><?php echo xe($sheet_name); ?></Title>
-    <Author>SENAI Gestão Escolar</Author>
-    <Created><?php echo date('Y-m-d\TH:i:s\Z'); ?></Created>
-  </DocumentProperties>
-
   <Styles>
-    <!-- Header style: modern blue SENAI, white bold text, centered -->
     <Style ss:ID="sHeader">
       <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
       <Borders>
@@ -227,139 +181,56 @@ echo '<?mso-application progid="Excel.Sheet"?>' . "\n";
       <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="11" ss:FontName="Segoe UI"/>
       <Interior ss:Color="#0056A4" ss:Pattern="Solid"/>
     </Style>
-    <!-- Row even: very light gray -->
-    <Style ss:ID="sEven">
-      <Alignment ss:Vertical="Center" ss:WrapText="0"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
-        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
-      </Borders>
-      <Font ss:Color="#333333" ss:Size="10" ss:FontName="Segoe UI"/>
-      <Interior ss:Color="#F5F7FA" ss:Pattern="Solid"/>
-    </Style>
-    <!-- Row odd: white -->
-    <Style ss:ID="sOdd">
-      <Alignment ss:Vertical="Center" ss:WrapText="0"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#EEEEEE"/>
-        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#EEEEEE"/>
-      </Borders>
-      <Font ss:Color="#333333" ss:Size="10" ss:FontName="Segoe UI"/>
-      <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
-    </Style>
-    <!-- Number style -->
-    <Style ss:ID="sNum">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
-        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
-      </Borders>
-      <Font ss:Color="#333333" ss:Size="10" ss:FontName="Segoe UI"/>
-      <Interior ss:Color="#F5F7FA" ss:Pattern="Solid"/>
-    </Style>
-    <!-- City badge style: blue tint -->
-    <Style ss:ID="sCity">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DAE1E7"/>
-        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DAE1E7"/>
-      </Borders>
-      <Font ss:Color="#004A8D" ss:Bold="1" ss:Size="10" ss:FontName="Segoe UI"/>
-      <Interior ss:Color="#E6F0F8" ss:Pattern="Solid"/>
-    </Style>
-    <!-- Time style: centered -->
-    <Style ss:ID="sTime">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
-        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
-      </Borders>
-      <Font ss:Color="#D32F2F" ss:Bold="1" ss:Size="10" ss:FontName="Segoe UI"/>
-      <Interior ss:Color="#FFEBEE" ss:Pattern="Solid"/>
-    </Style>
+    <Style ss:ID="sDefault"><Alignment ss:Vertical="Center"/><Font ss:FontName="Segoe UI" ss:Size="10"/></Style>
+    <Style ss:ID="sEven"><Interior ss:Color="#F5F7FA" ss:Pattern="Solid"/></Style>
+    <Style ss:ID="sDate"><NumberFormat ss:Format="Short Date"/></Style>
+    <Style ss:ID="sNum"><Alignment ss:Horizontal="Center"/></Style>
+    <Style ss:ID="sTime"><Alignment ss:Horizontal="Center"/><Font ss:Color="#D32F2F" ss:Bold="1"/></Style>
   </Styles>
-
   <Worksheet ss:Name="<?php echo xe($sheet_name); ?>">
-    <Table ss:DefaultRowHeight="16">
-
-      <?php // Column widths
-foreach ($cols as $c):
-    $w = $col_widths[$c] ?? 100;
-?>
-      <Column ss:AutoFitWidth="0" ss:Width="<?php echo $w; ?>"/>
+    <Table ss:DefaultRowHeight="18">
+      <?php foreach ($cols as $c): ?>
+      <Column ss:AutoFitWidth="1" ss:Width="100"/>
       <?php
 endforeach; ?>
-
-      <!-- Header Row -->
-      <Row ss:Height="24">
+      <Row ss:Height="25" ss:StyleID="sHeader">
         <?php foreach ($cols as $c): ?>
-        <Cell ss:StyleID="sHeader">
-          <Data ss:Type="String"><?php echo xe($headers_map[$c] ?? $c); ?></Data>
-        </Cell>
+        <Cell><Data ss:Type="String"><?php echo xe($headers_map[$c] ?? $c); ?></Data></Cell>
         <?php
 endforeach; ?>
       </Row>
-
-      <?php
-$numeric_cols = ['id', 'carga_horaria_h', 'duracao_dias', 'total_aulas_agendadas'];
-$time_cols = ['hora_inicio', 'hora_fim'];
-$city_cols = ['cidade'];
-$date_cols = ['data', 'data_inicio', 'data_fim'];
-
-$row_i = 0;
-foreach ($data as $row):
-    $style_base = ($row_i % 2 === 0) ? 'sEven' : 'sOdd';
-    $row_i++;
+      <?php if ($has_data):
+    $numeric_cols = ['id', 'carga_horaria_h', 'duracao_dias', 'total_aulas_agendadas'];
+    $time_cols = ['hora_inicio', 'hora_fim'];
+    $date_cols = ['data', 'data_inicio', 'data_fim'];
+    foreach ($data as $i => $row):
+        $row_style = ($i % 2 === 0) ? 'sEven' : '';
 ?>
-      <Row ss:Height="16">
+      <Row ss:StyleID="sDefault">
         <?php foreach ($cols as $c):
-        $v = $row[$c] ?? '';
-
-        // Format dates
-        if (in_array($c, $date_cols) && $v) {
-            $v = date('d/m/Y', strtotime($v));
-        }
-        // Format times
-        if (in_array($c, $time_cols) && $v) {
-            $v = substr($v, 0, 5);
-        }
-
-        // Pick style
-        if (in_array($c, $time_cols)) {
-            $style = 'sTime';
-        }
-        elseif (in_array($c, $city_cols)) {
-            $style = 'sCity';
-        }
-        elseif (in_array($c, $numeric_cols)) {
-            $style = 'sNum';
-        }
-        else {
-            $style = $style_base;
-        }
-
-        $type = in_array($c, $numeric_cols) ? 'Number' : 'String';
-?>
-        <Cell ss:StyleID="<?php echo $style; ?>">
-          <Data ss:Type="<?php echo $type; ?>"><?php echo xe($v); ?></Data>
-        </Cell>
-        <?php
-    endforeach; ?>
+            $v = $row[$c] ?? '';
+            $type = 'String';
+            $style = $row_style;
+            if (in_array($c, $numeric_cols)) {
+                $type = 'Number';
+                $style .= ' sNum';
+            }
+            elseif (in_array($c, $date_cols)) {
+                $type = 'DateTime';
+                $style .= ' sDate';
+                $v = $v ? date('Y-m-d\T00:00:00.000', strtotime($v)) : '';
+            }
+            elseif (in_array($c, $time_cols)) {
+                $v = substr($v, 0, 5);
+                $style .= ' sTime';
+            }
+?><Cell ss:StyleID="<?php echo trim($style); ?>"><Data ss:Type="<?php echo $type; ?>"><?php echo xe($v); ?></Data></Cell><?php
+        endforeach; ?>
       </Row>
       <?php
-endforeach; ?>
-
+    endforeach;
+endif; ?>
     </Table>
-
-    <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
-      <FreezePanes/>
-      <FrozenNoSplit/>
-      <SplitHorizontal>1</SplitHorizontal>
-      <TopRowBottomPane>1</TopRowBottomPane>
-      <ActivePane>2</ActivePane>
-    </WorksheetOptions>
-
   </Worksheet>
 </Workbook>
-<?php
-exit;
+<?php exit;

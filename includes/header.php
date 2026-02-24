@@ -65,6 +65,12 @@ $theme = isset($_COOKIE['theme']) ? $_COOKIE['theme'] : 'light';
                         <i class="fas fa-door-open"></i> Agenda Salas
                     </a>
                 </li>
+                <li style="margin-top: 15px; padding: 0 20px; font-size: 0.7rem; text-transform: uppercase; opacity: 0.6;">Ferramentas</li>
+                <li>
+                    <a href="import_excel.php" class="<?php echo $current_page == 'import_excel.php' ? 'active' : ''; ?>">
+                        <i class="fas fa-file-import"></i> Importar Excel
+                    </a>
+                </li>
             </ul>
         </aside>
 

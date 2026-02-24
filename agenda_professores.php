@@ -1,5 +1,33 @@
 <?php
+
 require_once 'includes/db.php';
+
+// --- AJAX HANDLER FOR TIMELINE DATA ---
+if (isset($_GET['ajax_availability'])) {
+    $prof_id = (int)$_GET['prof_id'];
+    $month = $_GET['month']; // Y-m
+    $f_day = $month . '-01';
+    $l_day = date('Y-m-t', strtotime($f_day));
+
+    $st = $pdo->prepare("
+        SELECT a.data, t.nome as turma_nome 
+        FROM agenda a 
+        JOIN turmas t ON a.turma_id = t.id
+        WHERE a.professor_id = ? AND a.data BETWEEN ? AND ?
+    ");
+    $st->execute([$prof_id, $f_day, $l_day]);
+    $results = $st->fetchAll();
+
+    $busy = [];
+    foreach ($results as $row) {
+        $busy[$row['data']] = $row['turma_nome'];
+    }
+
+    header('Content-Type: application/json');
+    echo json_encode(['busy' => $busy]);
+    exit;
+}
+
 include 'includes/header.php';
 
 // Date range for the timeline (default: current month)
@@ -103,13 +131,65 @@ $salas_select = $pdo->query("SELECT id, nome FROM salas ORDER BY nome ASC")->fet
     
     .bar-day-label {
         position: absolute;
-        bottom: -25px;
-        font-size: 0.7rem;
+        bottom: -28px;
+        font-size: 0.65rem;
         color: var(--text-muted);
         font-weight: 700;
         width: 100%;
         text-align: center;
+        line-height: 1.1;
     }
+    .bar-day-name {
+        display: block;
+        font-size: 0.55rem;
+        text-transform: uppercase;
+        opacity: 0.8;
+    }
+    .bar-segment-weekend{ 
+        background-color: #f0f0f0 !important; 
+        color: #999 !important; 
+        background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,0.03) 5px, rgba(0,0,0,0.03) 10px);
+    }
+    .bar-segment-weekendd{ 
+        background-color: #ffcdd2 !important; 
+        color: #999 !important; 
+        background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,0.03) 5px, rgba(0,0,0,0.03) 10px);
+    }
+    .bar-segment-busy.bar-segment-weekend { background-color: #ffcdd2 !important; color: #b71c1c !important; opacity: 0.8; }
+    .bar-segment-free.bar-segment-weekend { opacity: 1; }
+
+    /* Legend Refinement */
+    .timeline-legend {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        margin-bottom: 25px;
+        flex-wrap: wrap;
+        font-size: 0.85rem;
+    }
+    .legend-item { display: flex; align-items: center; gap: 8px; }
+    .legend-box { width: 16px; height: 16px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1); }
+
+    .month-nav {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+    .month-btn {
+        background: var(--bg-color);
+        border: 1px solid var(--border-color);
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .month-btn:hover { background: var(--primary-red); color: #fff; border-color: var(--primary-red); }
 
     /* Modal Base Styles */
     .modal {
@@ -165,11 +245,19 @@ endforeach; ?>
 <div id="timelineModal" class="modal">
     <div class="modal-content timeline-modal-content" style="text-align: center;">
         <span class="close-modal" onclick="closeModal('timelineModal')">&times;</span>
-        <h2 id="timeline_prof_name" style="margin-bottom: 5px;">Timeline</h2>
-        <p style="color: var(--text-muted); margin-bottom: 30px;">
-           <span style="display:inline-block; width:15px; height:15px; background:#ff1c1c; border-radius:3px; vertical-align:middle;"></span> Ocupado 
-           <span style="display:inline-block; width:15px; height:15px; background:#2e7d32; border-radius:3px; margin-left:20px; vertical-align:middle;"></span> Livre (Clique para selecionar período)
-        </p>
+        
+        <div class="month-nav">
+            <button class="month-btn" id="prev_month_btn"><i class="fas fa-chevron-left"></i></button>
+            <h2 id="timeline_prof_name" style="margin: 0; min-width: 280px;">Timeline</h2>
+            <button class="month-btn" id="next_month_btn"><i class="fas fa-chevron-right"></i></button>
+        </div>
+
+        <div class="timeline-legend">
+            <div class="legend-item"><div class="legend-box" style="background:#2e7d32;"></div><span>Livre</span></div>
+            <div class="legend-item"><div class="legend-box" style="background:#ff1c1c;"></div><span>Ocupado</span></div>
+            <div class="legend-item"><div class="legend-box bar-segment-weekend" style="border:1px solid #ccc;"></div><span>Sábado (Livre)</span></div>
+            <div class="legend-item"><div class="legend-box bar-segment-weekendd" style="background:#ffcdd2;"></div><span>Domingo (Bloqueado)</span></div>
+        </div>
         
         <div class="timeline-bar-container" id="timeline_render_area">
             <!-- Continuous bar will be injected here by JS -->
@@ -265,36 +353,101 @@ endforeach; ?>
 
 <script>
 const profBusyData = <?php echo json_encode($prof_data); ?>;
-const daysInMonth = <?php echo json_encode($days_array); ?>;
-const currentMonthLabel = "<?php echo date('F Y', strtotime($start_month)); ?>";
+let currentProfId = null;
+let currentProfNome = "";
+let currentViewMonth = "<?php echo $start_month; ?>";
 
 function openTimelineModal(profId, profNome) {
-    const modal = document.getElementById('timelineModal');
-    document.getElementById('timeline_prof_name').innerText = `${profNome} (${currentMonthLabel})`;
+    currentProfId = profId;
+    currentProfNome = profNome;
+    currentViewMonth = document.getElementById('month_selector').value;
     
-    renderTimelineBar(profId, profNome);
-    modal.style.display = 'block';
+    updateModalTitle();
+    renderTimelineBar(currentProfId, currentProfNome, currentViewMonth, profBusyData[currentProfId] || {});
+    document.getElementById('timelineModal').style.display = 'block';
 }
 
-function renderTimelineBar(profId, profNome) {
+function updateModalTitle() {
+    const dateObj = new Date(currentViewMonth + "-01T00:00:00");
+    const monthName = dateObj.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    document.getElementById('timeline_prof_name').innerHTML = `<div style="font-size:0.9rem; opacity:0.7;">${currentProfNome}</div><div style="text-transform:capitalize;">${monthName}</div>`;
+}
+
+document.getElementById('prev_month_btn').onclick = () => changeMonth(-1);
+document.getElementById('next_month_btn').onclick = () => changeMonth(1);
+
+function changeMonth(delta) {
+    let [year, month] = currentViewMonth.split('-').map(Number);
+    month += delta;
+    if (month > 12) { month = 1; year++; }
+    if (month < 1) { month = 12; year--; }
+    currentViewMonth = `${year}-${String(month).padStart(2, '0')}`;
+    
+    updateModalTitle();
+    fetchNewAvailability();
+}
+
+async function fetchNewAvailability() {
     const container = document.getElementById('timeline_render_area');
-    const busyDays = profBusyData[profId] || {};
+    container.style.opacity = '0.5';
+    
+    try {
+        const response = await fetch(`?ajax_availability=1&prof_id=${currentProfId}&month=${currentViewMonth}`);
+        const data = await response.json();
+        renderTimelineBar(currentProfId, currentProfNome, currentViewMonth, data.busy);
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao carregar dados.");
+    } finally {
+        container.style.opacity = '1';
+    }
+}
+
+function renderTimelineBar(profId, profNome, monthStr, busyDays) {
+    const container = document.getElementById('timeline_render_area');
+    
+    const date = new Date(monthStr + "-01T00:00:00");
+    const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    
+    const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     
     let html = `<div class="timeline-bar">`;
     
-    daysInMonth.forEach(d => {
-        const isBusy = busyDays[d.full];
-        const weekendClass = d.is_weekend ? 'bar-segment-weekend' : '';
-        const statusClass = isBusy ? 'bar-segment-busy' : 'bar-segment-free';
+    for (let i = 1; i <= daysInMonth; i++) {
+        const dStr = `${monthStr}-${String(i).padStart(2, '0')}`;
+        const dObj = new Date(dStr + "T00:00:00");
+        const dow = dObj.getDay();
+        const isBusy = busyDays[dStr];
+        
+        const isSunday = (dow === 0);
+        const isSaturday = (dow === 6);
+        const isWeekend = isSunday || isSaturday;
+        
+        // Determinar estado final: Se for domingo, é BLOQUEADO independente de ter aula ou não
+        const statusClass = (isBusy || isSunday) ? 'bar-segment-busy' : 'bar-segment-free';
+        const weekendClass = isWeekend ? 'bar-segment-weekend' : '';
+        
+        // Título/Tooltip
+        let tooltip = '';
+        if (isSunday) {
+            tooltip = '(DOMINGO)';
+        } else if (isBusy) {
+            tooltip = 'OCUPADO: ' + isBusy;
+        } else {
+            tooltip = 'LIVRE: Clique para agendar';
+        }
         
         html += `
             <div class="bar-segment ${statusClass} ${weekendClass}" 
-                 ${!isBusy ? `onclick="openScheduleModal(${profId}, '${profNome}', '${d.full}')"` : ''}
-                 title="${isBusy ? 'OCUPADO: ' + isBusy : 'LIVRE: Clique para agendar'}">
-                ${d.day}
-                <div class="bar-day-label">${d.day}</div>
+                 ${(!isBusy && !isSunday) ? `onclick="openScheduleModal(${profId}, '${profNome}', '${dStr}')"` : ''}
+                 title="${tooltip}">
+                ${i}
+                <div class="bar-day-label">
+                    <span class="bar-day-name">${dayNames[dow]}</span>
+                    ${i}
+                </div>
             </div>`;
-    });
+    }
     
     html += `</div>`;
     container.innerHTML = html;
@@ -303,9 +456,8 @@ function renderTimelineBar(profId, profNome) {
 function openScheduleModal(profId, profNome, date) {
     document.getElementById('form_prof_id').value = profId;
     document.getElementById('form_date_start').value = date;
-    document.getElementById('form_date_end').value = date; // Inicia com o mesmo dia
+    document.getElementById('form_date_end').value = date;
     document.getElementById('schedule_info').innerHTML = `<i class="fas fa-user"></i> Professor: ${profNome} <br> <i class="fas fa-calendar-alt"></i> Data Inicial selecionada: ${new Date(date + 'T00:00:00').toLocaleDateString('pt-BR')}`;
-    
     document.getElementById('scheduleModal').style.display = 'block';
 }
 

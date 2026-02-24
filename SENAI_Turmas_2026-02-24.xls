@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:html="http://www.w3.org/TR/REC-html40">
+
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Title>Turmas SENAI</Title>
+    <Author>SENAI Gestão Escolar</Author>
+    <Created>2026-02-24T12:40:54Z</Created>
+  </DocumentProperties>
+
+  <Styles>
+    <!-- Header style: modern blue SENAI, white bold text, centered -->
+    <Style ss:ID="sHeader">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#004A8D"/>
+        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#0056A4"/>
+      </Borders>
+      <Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="11" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#0056A4" ss:Pattern="Solid"/>
+    </Style>
+    <!-- Row even: very light gray -->
+    <Style ss:ID="sEven">
+      <Alignment ss:Vertical="Center" ss:WrapText="0"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+      </Borders>
+      <Font ss:Color="#333333" ss:Size="10" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#F5F7FA" ss:Pattern="Solid"/>
+    </Style>
+    <!-- Row odd: white -->
+    <Style ss:ID="sOdd">
+      <Alignment ss:Vertical="Center" ss:WrapText="0"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#EEEEEE"/>
+        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#EEEEEE"/>
+      </Borders>
+      <Font ss:Color="#333333" ss:Size="10" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
+    </Style>
+    <!-- Number style -->
+    <Style ss:ID="sNum">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+      </Borders>
+      <Font ss:Color="#333333" ss:Size="10" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#F5F7FA" ss:Pattern="Solid"/>
+    </Style>
+    <!-- City badge style: blue tint -->
+    <Style ss:ID="sCity">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DAE1E7"/>
+        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#DAE1E7"/>
+      </Borders>
+      <Font ss:Color="#004A8D" ss:Bold="1" ss:Size="10" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#E6F0F8" ss:Pattern="Solid"/>
+    </Style>
+    <!-- Time style: centered -->
+    <Style ss:ID="sTime">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+      </Borders>
+      <Font ss:Color="#D32F2F" ss:Bold="1" ss:Size="10" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#FFEBEE" ss:Pattern="Solid"/>
+    </Style>
+  </Styles>
+
+  <Worksheet ss:Name="Turmas SENAI">
+    <Table ss:DefaultRowHeight="16">
+
+            <Column ss:AutoFitWidth="0" ss:Width="50"/>
+            <Column ss:AutoFitWidth="0" ss:Width="120"/>
+            <Column ss:AutoFitWidth="0" ss:Width="200"/>
+            <Column ss:AutoFitWidth="0" ss:Width="90"/>
+            <Column ss:AutoFitWidth="0" ss:Width="90"/>
+            <Column ss:AutoFitWidth="0" ss:Width="130"/>
+            <Column ss:AutoFitWidth="0" ss:Width="90"/>
+            <Column ss:AutoFitWidth="0" ss:Width="90"/>
+            <Column ss:AutoFitWidth="0" ss:Width="80"/>
+            <Column ss:AutoFitWidth="0" ss:Width="90"/>
+            <Column ss:AutoFitWidth="0" ss:Width="200"/>
+            <Column ss:AutoFitWidth="0" ss:Width="160"/>
+      
+      <!-- Header Row -->
+      <Row ss:Height="24">
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">ID</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Turma</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Curso</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Carga Horária (h)</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Turno</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Cidade</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Data Início</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Data Fim</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Duração (dias)</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Total Aulas Agendadas</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Professores</Data>
+        </Cell>
+                <Cell ss:StyleID="sHeader">
+          <Data ss:Type="String">Ambientes Utilizados</Data>
+        </Cell>
+              </Row>
+
+            <Row ss:Height="16">
+                <Cell ss:StyleID="sNum">
+          <Data ss:Type="Number">1</Data>
+        </Cell>
+                <Cell ss:StyleID="sEven">
+          <Data ss:Type="String">MathParadiseguei</Data>
+        </Cell>
+                <Cell ss:StyleID="sEven">
+          <Data ss:Type="String">Rafael Adriano Oliveira da Silva</Data>
+        </Cell>
+                <Cell ss:StyleID="sNum">
+          <Data ss:Type="Number">60</Data>
+        </Cell>
+                <Cell ss:StyleID="sEven">
+          <Data ss:Type="String">Vespertino</Data>
+        </Cell>
+                <Cell ss:StyleID="sCity">
+          <Data ss:Type="String">Votuporanga</Data>
+        </Cell>
+                <Cell ss:StyleID="sEven">
+          <Data ss:Type="String">24/02/2026</Data>
+        </Cell>
+                <Cell ss:StyleID="sEven">
+          <Data ss:Type="String">31/03/2026</Data>
+        </Cell>
+                <Cell ss:StyleID="sNum">
+          <Data ss:Type="Number">35</Data>
+        </Cell>
+                <Cell ss:StyleID="sNum">
+          <Data ss:Type="Number">31</Data>
+        </Cell>
+                <Cell ss:StyleID="sEven">
+          <Data ss:Type="String">MathParadise</Data>
+        </Cell>
+                <Cell ss:StyleID="sEven">
+          <Data ss:Type="String">MathParadiseisGuei</Data>
+        </Cell>
+              </Row>
+      
+    </Table>
+
+    <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+      <FreezePanes/>
+      <FrozenNoSplit/>
+      <SplitHorizontal>1</SplitHorizontal>
+      <TopRowBottomPane>1</TopRowBottomPane>
+      <ActivePane>2</ActivePane>
+    </WorksheetOptions>
+
+  </Worksheet>
+</Workbook>
