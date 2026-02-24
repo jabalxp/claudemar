@@ -1,0 +1,33 @@
+RESUMO DAS IMPLEMENTAÇÕES - SISTEMA DE GESTÃO ESCOLAR (SENAI STYLE)
+
+1. Redesign de Interface (UI/UX):
+   - Implementação de um dashboard moderno inspirado no padrão SENAI.
+   - Barra lateral (Sidebar) vermelha fixa com logo e navegação intuitiva.
+   - Header superior dinâmico com saudações e perfil do usuário.
+   - Layout de cards para a home e tabelas refinadas para listagens.
+
+2. Sistema de Temas (Light/Dark Mode):
+   - Implementação de troca de tema (claro/escuro) com persistência.
+   - Uso de variáveis CSS para garantir consistência visual em ambos os modos.
+   - Persistência garantida via LocalStorage (versão HTML) e Cookies (versão PHP).
+
+3. Calendários e Navegação:
+   - Criação de visualização de agenda estilo "Trello" para Professores e Salas.
+   - Implementação de setas de navegação por semana nos calendários.
+   - Etiquetas informativas dentro dos cards de aula (ex: indicação de sala no horário do professor).
+
+4. Migração para PHP/MySQL Dinâmico:
+   - Estruturação de banco de dados robusto (MySQL) com tabelas para Professores, Salas (Ambientes), Cursos, Turmas e Agenda.
+   - Criação de componentes reutilizáveis (header.php, footer.php).
+   - CRUD completo para todas as entidades principais.
+
+5. Motor de Planejamento e Conflitos (O Coração do Sistema):
+   - Módulo de "Planejamento de Turma" que gera agendas automaticamente por períodos (data início/fim).
+   - Motor de detecção de conflitos que vasculha o banco dia a dia.
+   - Bloqueio automático de registros se o Professor ou a Sala já estiverem ocupados no horário/dia selecionado.
+   - Uso de transações SQL para garantir a integridade dos dados na geração da agenda.
+
+6. Limpeza e Organização:
+   - Migração total de .html para .php.
+   - Remoção de arquivos estáticos redundantes.
+   - Padronização do CSS e JavaScript.
