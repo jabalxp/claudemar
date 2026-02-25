@@ -1,9 +1,9 @@
 <?php 
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 include 'includes/header.php'; 
 
-$stmt = $pdo->query("SELECT * FROM cursos ORDER BY nome ASC");
-$cursos = $stmt->fetchAll();
+$cursos = $mysqli->query("SELECT * FROM cursos ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -32,7 +32,9 @@ $cursos = $stmt->fetchAll();
                     <td><?php echo $curso['carga_horaria']; ?> horas</td>
                     <td>
                         <a href="cursos_form.php?id=<?php echo $curso['id']; ?>" class="btn" style="padding: 5px 10px; background: #ffc107; color: #000;"><i class="fas fa-edit"></i></a>
+                        <?php if (can_delete()): ?>
                         <a href="cursos_process.php?action=delete&id=<?php echo $curso['id']; ?>" class="btn" style="padding: 5px 10px; background: #dc3545; color: #fff;" onclick="return confirm('Tem certeza que deseja excluir?')"><i class="fas fa-trash"></i></a>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>

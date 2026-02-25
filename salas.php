@@ -1,10 +1,10 @@
 <?php 
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 include 'includes/header.php'; 
 
 // Fetch all rooms
-$stmt = $pdo->query("SELECT * FROM salas ORDER BY nome ASC");
-$salas = $stmt->fetchAll();
+$salas = $mysqli->query("SELECT * FROM salas ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -39,7 +39,9 @@ $salas = $stmt->fetchAll();
                     <td><?php echo $sala['capacidade']; ?> alunos</td>
                     <td>
                         <a href="salas_form.php?id=<?php echo $sala['id']; ?>" class="btn" style="padding: 5px 10px; background: #ffc107; color: #000;"><i class="fas fa-edit"></i></a>
+                        <?php if (can_delete()): ?>
                         <a href="salas_process.php?action=delete&id=<?php echo $sala['id']; ?>" class="btn" style="padding: 5px 10px; background: #dc3545; color: #fff;" onclick="return confirm('Tem certeza que deseja excluir?')"><i class="fas fa-trash"></i></a>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>

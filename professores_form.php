@@ -1,16 +1,18 @@
 <?php
 
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 include 'includes/header.php';
 
 
 $id = isset($_GET['id']) ? $_GET['id'] : null;
-$prof = ['nome' => '', 'especialidade' => '', 'email' => '', 'cor_agenda' => '#ed1c24'];
+$prof = ['nome' => '', 'especialidade' => '', 'email' => '', 'cor_agenda' => '#ed1c24', 'carga_horaria_contratual' => 0, 'cidade' => ''];
 
 if ($id) {
-    $stmt = $pdo->prepare("SELECT * FROM professores WHERE id = ?");
-    $stmt->execute([$id]);
-    $prof = $stmt->fetch();
+    $stmt = $mysqli->prepare("SELECT * FROM professores WHERE id = ?");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    $prof = $stmt->get_result()->fetch_assoc();
     if (!$prof) {
         header("Location: professores.php");
         exit;
@@ -40,6 +42,17 @@ if ($id) {
         <div style="margin-bottom: 15px;">
             <label style="display: block; margin-bottom: 5px; font-weight: 600;">E-mail</label>
             <input type="email" name="email" value="<?php echo htmlspecialchars($prof['email']); ?>" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Carga Horária Contratual (h)</label>
+                <input type="number" name="carga_horaria_contratual" value="<?php echo (int)$prof['carga_horaria_contratual']; ?>" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Cidade</label>
+                <input type="text" name="cidade" value="<?php echo htmlspecialchars($prof['cidade'] ?? ''); ?>" placeholder="Ex: Votuporanga" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+            </div>
         </div>
 
         <div style="margin-bottom: 20px;">

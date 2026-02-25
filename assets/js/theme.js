@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const themeToggle = document.getElementById('theme-toggle');
-    const body = document.body;
+    const body = document.documentElement;
     const icon = themeToggle ? themeToggle.querySelector('i') : null;
 
     // Check for saved theme in localStorage

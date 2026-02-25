@@ -1,10 +1,12 @@
-<?php 
+<?php
+
 require_once 'includes/db.php';
-include 'includes/header.php'; 
+require_once 'includes/auth.php';
+include 'includes/header.php';
+
 
 // Fetch all professors
-$stmt = $pdo->query("SELECT * FROM professores ORDER BY nome ASC");
-$professores = $stmt->fetchAll();
+$professores = $mysqli->query("SELECT * FROM professores ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -28,7 +30,8 @@ $professores = $stmt->fetchAll();
                 <tr>
                     <td colspan="5" style="text-align: center;">Nenhum professor cadastrado.</td>
                 </tr>
-            <?php else: ?>
+            <?php
+else: ?>
                 <?php foreach ($professores as $prof): ?>
                 <tr>
                     <td><?php echo htmlspecialchars($prof['nome']); ?></td>
@@ -42,11 +45,15 @@ $professores = $stmt->fetchAll();
                     </td>
                     <td>
                         <a href="professores_form.php?id=<?php echo $prof['id']; ?>" class="btn" style="padding: 5px 10px; background: #ffc107; color: #000;"><i class="fas fa-edit"></i></a>
+                        <?php if (can_delete()): ?>
                         <a href="professores_process.php?action=delete&id=<?php echo $prof['id']; ?>" class="btn" style="padding: 5px 10px; background: #dc3545; color: #fff;" onclick="return confirm('Tem certeza que deseja excluir?')"><i class="fas fa-trash"></i></a>
+                        <?php endif; ?>
                     </td>
                 </tr>
-                <?php endforeach; ?>
-            <?php endif; ?>
+                <?php
+    endforeach; ?>
+            <?php
+endif; ?>
         </tbody>
     </table>
 </div>

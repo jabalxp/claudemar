@@ -1,57 +1,56 @@
 <?php
 
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 include 'includes/header.php';
 
 
 // Fetch stats
-$count_prof = $pdo->query("SELECT COUNT(*) FROM professores")->fetchColumn();
-$count_salas = $pdo->query("SELECT COUNT(*) FROM salas")->fetchColumn();
-$count_turmas = $pdo->query("SELECT COUNT(*) FROM turmas")->fetchColumn();
-$count_aulas = $pdo->query("SELECT COUNT(*) FROM agenda")->fetchColumn();
-$count_cursos = $pdo->query("SELECT COUNT(*) FROM cursos")->fetchColumn();
+$count_prof = $mysqli->query("SELECT COUNT(*) FROM professores")->fetch_row()[0];
+$count_salas = $mysqli->query("SELECT COUNT(*) FROM salas")->fetch_row()[0];
+$count_turmas = $mysqli->query("SELECT COUNT(*) FROM turmas")->fetch_row()[0];
+$count_aulas = $mysqli->query("SELECT COUNT(*) FROM agenda")->fetch_row()[0];
+$count_cursos = $mysqli->query("SELECT COUNT(*) FROM cursos")->fetch_row()[0];
 
 // Fetch distinct cities for filter
-$stmt_cidades = $pdo->query("SELECT DISTINCT cidade FROM turmas WHERE cidade IS NOT NULL AND cidade != '' ORDER BY cidade ASC");
-$cidades = $stmt_cidades->fetchAll(PDO::FETCH_COLUMN);
+$cidades = array_column($mysqli->query("SELECT DISTINCT cidade FROM turmas WHERE cidade IS NOT NULL AND cidade != '' ORDER BY cidade ASC")->fetch_all(MYSQLI_NUM), 0);
 
 // City filter
 $filtro_cidade = isset($_GET['cidade']) ? $_GET['cidade'] : '';
 
 // Fetch today's classes with optional city filter
 $today = date('Y-m-d');
+$sql_today = "
+    SELECT a.*, t.nome as turma_nome, t.cidade, 
+           p1.nome as professor_nome, p1.cor_agenda as professor_cor,
+           p2.nome as professor_nome_2, 
+           p3.nome as professor_nome_3, 
+           s.nome as sala_nome 
+    FROM agenda a 
+    JOIN turmas t ON a.turma_id = t.id 
+    JOIN professores p1 ON a.professor_id = p1.id 
+    LEFT JOIN professores p2 ON a.professor_id_2 = p2.id 
+    LEFT JOIN professores p3 ON a.professor_id_3 = p3.id 
+    JOIN salas s ON a.sala_id = s.id 
+    WHERE a.data = ? 
+";
 if ($filtro_cidade) {
-    $stmt_today = $pdo->prepare("
-        SELECT a.*, t.nome as turma_nome, t.cidade, p.nome as professor_nome, s.nome as sala_nome 
-        FROM agenda a 
-        JOIN turmas t ON a.turma_id = t.id 
-        JOIN professores p ON a.professor_id = p.id 
-        JOIN salas s ON a.sala_id = s.id 
-        WHERE a.data = ? AND t.cidade = ?
-        ORDER BY a.hora_inicio ASC
-    ");
-    $stmt_today->execute([$today, $filtro_cidade]);
+    $sql_today .= " AND t.cidade = ?";
+    $stmt_today = $mysqli->prepare($sql_today . " ORDER BY a.hora_inicio ASC");
+    $stmt_today->bind_param('ss', $today, $filtro_cidade);
 }
 else {
-    $stmt_today = $pdo->prepare("
-        SELECT a.*, t.nome as turma_nome, t.cidade, p.nome as professor_nome, s.nome as sala_nome 
-        FROM agenda a 
-        JOIN turmas t ON a.turma_id = t.id 
-        JOIN professores p ON a.professor_id = p.id 
-        JOIN salas s ON a.sala_id = s.id 
-        WHERE a.data = ? 
-        ORDER BY a.hora_inicio ASC
-    ");
-    $stmt_today->execute([$today]);
+    $stmt_today = $mysqli->prepare($sql_today . " ORDER BY a.hora_inicio ASC");
+    $stmt_today->bind_param('s', $today);
 }
-$aulas_hoje = $stmt_today->fetchAll();
+$stmt_today->execute();
+$aulas_hoje = $stmt_today->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Turmas by city count
-$stmt_turmas_cidade = $pdo->query("SELECT COALESCE(cidade, 'Sede') as cidade, COUNT(*) as total FROM turmas GROUP BY COALESCE(cidade, 'Sede') ORDER BY total DESC");
-$turmas_por_cidade = $stmt_turmas_cidade->fetchAll();
+$turmas_por_cidade = $mysqli->query("SELECT COALESCE(cidade, 'Sede') as cidade, COUNT(*) as total FROM turmas GROUP BY COALESCE(cidade, 'Sede') ORDER BY total DESC")->fetch_all(MYSQLI_ASSOC);
 
 // Upcoming turmas (next 5 turmas starting)
-$stmt_proximas = $pdo->prepare("
+$stmt_proximas = $mysqli->prepare("
     SELECT t.nome, t.cidade, c.nome as curso_nome, t.data_inicio, t.turno 
     FROM turmas t 
     JOIN cursos c ON t.curso_id = c.id 
@@ -59,8 +58,9 @@ $stmt_proximas = $pdo->prepare("
     ORDER BY t.data_inicio ASC 
     LIMIT 5
 ");
-$stmt_proximas->execute([$today]);
-$proximas_turmas = $stmt_proximas->fetchAll();
+$stmt_proximas->bind_param('s', $today);
+$stmt_proximas->execute();
+$proximas_turmas = $stmt_proximas->get_result()->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <style>
@@ -363,27 +363,68 @@ endforeach; ?>
 endif; ?>
         </form>
         <div style="margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-            <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); white-space: nowrap;">Exportar Turmas:</span>
-            <a href="export_excel.php?tipo=excel" class="btn-export btn-export-excel" title="Planilha Excel formatada (.xls)">
-                <i class="fas fa-file-excel"></i> Excel (.xls)
+            <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); white-space: nowrap;">Exportar:</span>
+            <a href="export_excel.php?tipo=completo" class="btn-export btn-export-excel" title="Planilha completa multi-aba (Docentes, Ambientes, Cursos, Turmas, Agenda)">
+                <i class="fas fa-file-excel"></i> Planilha Completa
             </a>
-            <a href="export_excel.php?tipo=powerbi" class="btn-export" style="background:#f2c811;color:#000;border-color:#d4a800;" title="CSV otimizado para importar no Power BI Desktop">
-                <i class="fas fa-chart-bar"></i> Power BI (.csv)
+            <a href="export_excel.php?tipo=powerbi" class="btn-export" style="background:#f2c811;color:#000;border-color:#d4a800;" title="CSV Turmas para Power BI Desktop">
+                <i class="fas fa-chart-bar"></i> Power BI Turmas
             </a>
-            <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; margin-left: 6px;">Agenda:</span>
-            <a href="export_excel.php?tipo=agenda" class="btn-export" title="Agenda completa — Excel formatado (.xls)">
-                <i class="fas fa-calendar-check"></i> Excel (.xls)
-            </a>
-            <a href="export_excel.php?tipo=agenda_powerbi" class="btn-export" style="background:#f2c811;color:#000;border-color:#d4a800;" title="Agenda completa para Power BI Desktop">
-                <i class="fas fa-chart-bar"></i> Power BI (.csv)
+            <a href="export_excel.php?tipo=agenda_powerbi" class="btn-export" style="background:#f2c811;color:#000;border-color:#d4a800;" title="CSV Agenda para Power BI Desktop">
+                <i class="fas fa-chart-bar"></i> Power BI Agenda
             </a>
         </div>
     </div>
 
     <!-- Main Dashboard Grid -->
     <div class="dashboard-grid">
-        <!-- Resumo de Disponibilidade dos Professores -->
-        <div class="dash-section" id="availability_section">
+        <div class="dash-column">
+            <!-- Aulas de Hoje -->
+            <div class="dash-section" style="margin-bottom: 20px;">
+                <div class="dash-section-header">
+                    <h3><i class="fas fa-calendar-day" style="color: var(--primary-red);"></i> Aulas de Hoje</h3>
+                    <span class="city-badge" style="background: rgba(0,0,0,0.05); color: var(--text-muted);">
+                        <?php echo count($aulas_hoje); ?> aulas agendadas
+                    </span>
+                </div>
+                <div class="dash-section-body" style="padding: 10px 0;">
+                    <?php if (empty($aulas_hoje)): ?>
+                        <p style="padding: 20px; text-align: center; color: var(--text-muted);">Nenhuma aula hoje.</p>
+                    <?php
+else: ?>
+                        <div class="today-classes-list">
+                            <?php foreach ($aulas_hoje as $a): ?>
+                                <div class="today-class-item" style="display: flex; align-items: center; padding: 12px 24px; border-bottom: 1px solid var(--border-color); gap: 15px;">
+                                    <div class="class-time" style="min-width: 100px; font-weight: 800; color: var(--primary-red); font-size: 0.9rem;">
+                                        <?php echo substr($a['hora_inicio'], 0, 5); ?> - <?php echo substr($a['hora_fim'], 0, 5); ?>
+                                    </div>
+                                    <div class="class-info" style="flex: 1;">
+                                        <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-color);"><?php echo htmlspecialchars($a['turma_nome']); ?></div>
+                                        <div style="font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+                                            <i class="fas fa-map-marker-alt"></i> <?php echo htmlspecialchars($a['cidade'] ?: 'Sede'); ?>
+                                            &middot; <i class="fas fa-door-open"></i> <?php echo htmlspecialchars($a['sala_nome']); ?>
+                                        </div>
+                                    </div>
+                                    <div class="class-prof" style="text-align: right;">
+                                        <div style="font-weight: 600; font-size: 0.85rem; color: var(--text-color);">
+                                            <?php
+        $profs = array_filter([$a['professor_nome'], $a['professor_nome_2'], $a['professor_nome_3']]);
+        echo implode(' / ', array_map('htmlspecialchars', $profs));
+?>
+                                        </div>
+                                        <div style="font-size: 0.72rem; color: var(--text-muted);">Professor(es)</div>
+                                    </div>
+                                </div>
+                            <?php
+    endforeach; ?>
+                        </div>
+                    <?php
+endif; ?>
+                </div>
+            </div>
+
+            <!-- Resumo de Disponibilidade dos Professores -->
+            <div class="dash-section" id="availability_section">
             <div class="dash-section-header" style="flex-wrap: wrap; gap: 15px;">
                 <div style="display:flex; align-items:center; gap:12px;">
                     <h3><i class="fas fa-chart-line" style="color: var(--primary-red);"></i> Análise de Desempenho</h3>
@@ -415,14 +456,16 @@ while ($current_date_calc <= $end_date_calc) {
 }
 
 // Buscar ocupação dos professores
-$stmt_disp = $pdo->prepare("
-                    SELECT p.id, p.nome, p.especialidade, COUNT(a.id) as dias_ocupados
-                    FROM professores p
-                    LEFT JOIN agenda a ON p.id = a.professor_id AND a.data BETWEEN ? AND ?
-                    GROUP BY p.id
-                ");
-$stmt_disp->execute([$start_month, $end_month]);
-$prof_availability = $stmt_disp->fetchAll();
+$stmt_disp = $mysqli->prepare("
+    SELECT p.id, p.nome, p.especialidade, COUNT(a.id) as dias_ocupados
+    FROM professores p
+    LEFT JOIN agenda a ON (p.id = a.professor_id OR p.id = a.professor_id_2 OR p.id = a.professor_id_3) 
+    AND a.data BETWEEN ? AND ?
+    GROUP BY p.id
+");
+$stmt_disp->bind_param('ss', $start_month, $end_month);
+$stmt_disp->execute();
+$prof_availability = $stmt_disp->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Calcular porcentagem
 foreach ($prof_availability as &$p) {
@@ -446,15 +489,25 @@ $prof_ids_gantt = array_column($prof_availability, 'id');
 $agenda_gantt = [];
 if (!empty($prof_ids_gantt)) {
     $placeholders = implode(',', array_fill(0, count($prof_ids_gantt), '?'));
-    $stmt_agenda = $pdo->prepare("
-        SELECT a.data, a.professor_id, t.nome as turma_nome
+    $stmt_agenda = $mysqli->prepare("
+        SELECT a.data, a.professor_id, a.professor_id_2, a.professor_id_3, t.nome as turma_nome
         FROM agenda a
         JOIN turmas t ON a.turma_id = t.id
-        WHERE a.professor_id IN ($placeholders) AND a.data BETWEEN ? AND ?
+        WHERE (a.professor_id IN ($placeholders) OR a.professor_id_2 IN ($placeholders) OR a.professor_id_3 IN ($placeholders)) 
+        AND a.data BETWEEN ? AND ?
     ");
-    $stmt_agenda->execute(array_merge($prof_ids_gantt, [$start_month, $end_month]));
-    while ($row = $stmt_agenda->fetch()) {
-        $agenda_gantt[$row['professor_id']][$row['data']] = $row['turma_nome'];
+    $types_gantt = str_repeat('i', count($prof_ids_gantt) * 3) . 'ss';
+    $params_gantt = array_merge($prof_ids_gantt, $prof_ids_gantt, $prof_ids_gantt, [$start_month, $end_month]);
+    $stmt_agenda->bind_param($types_gantt, ...$params_gantt);
+    $stmt_agenda->execute();
+    $result_gantt = $stmt_agenda->get_result();
+    while ($row = $result_gantt->fetch_assoc()) {
+        if (in_array($row['professor_id'], $prof_ids_gantt))
+            $agenda_gantt[$row['professor_id']][$row['data']] = $row['turma_nome'];
+        if (!empty($row['professor_id_2']) && in_array($row['professor_id_2'], $prof_ids_gantt))
+            $agenda_gantt[$row['professor_id_2']][$row['data']] = $row['turma_nome'];
+        if (!empty($row['professor_id_3']) && in_array($row['professor_id_3'], $prof_ids_gantt))
+            $agenda_gantt[$row['professor_id_3']][$row['data']] = $row['turma_nome'];
     }
 }
 
@@ -483,23 +536,127 @@ $days_in_month = (int)date('t');
                     .dash-chart-container.active { display: flex; }
                 </style>
 
-                <div id="dash_view_gantt" class="dash-chart-container active" style="flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 20px; display: flex;">
+                <?php
+// Summary stats
+$ocupacao_media = count($prof_availability) > 0 ? round(100 - (array_sum(array_column($prof_availability, 'perc_livre')) / count($prof_availability))) : 0;
+$total_aulas_stmt = $mysqli->prepare("SELECT COUNT(*) FROM agenda WHERE data BETWEEN ? AND ?");
+$total_aulas_stmt->bind_param('ss', $start_month, $end_month);
+$total_aulas_stmt->execute();
+$total_aulas_count = $total_aulas_stmt->get_result()->fetch_row()[0];
+$prof_mais_livre = !empty($prof_availability) ? $prof_availability[0] : null;
+$prof_mais_ocupado = !empty($prof_availability) ? end($prof_availability) : null;
+reset($prof_availability);
+
+// Turno distribution
+$stmt_turno_dist = $mysqli->prepare("SELECT 
+                        SUM(CASE WHEN hora_inicio < '12:00:00' THEN 1 ELSE 0 END) as manha,
+                        SUM(CASE WHEN hora_inicio >= '12:00:00' AND hora_inicio < '18:00:00' THEN 1 ELSE 0 END) as tarde,
+                        SUM(CASE WHEN hora_inicio >= '18:00:00' THEN 1 ELSE 0 END) as noite
+                    FROM agenda WHERE data BETWEEN ? AND ?");
+$stmt_turno_dist->bind_param('ss', $start_month, $end_month);
+$stmt_turno_dist->execute();
+$td = $stmt_turno_dist->get_result()->fetch_assoc();
+$td_m = (int)($td['manha'] ?? 0);
+$td_t = (int)($td['tarde'] ?? 0);
+$td_n = (int)($td['noite'] ?? 0);
+$td_total = max(1, $td_m + $td_t + $td_n);
+
+$month_names_dash = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+$dash_month_label = $month_names_dash[(int)date('n') - 1] . ' ' . date('Y');
+?>
+
+                <!-- Summary Stats Row -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 20px 20px 0;">
+                    <div style="background: var(--bg-color); border-radius: 12px; padding: 14px 16px; border: 1px solid var(--border-color); text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: 800; color: <?php echo $ocupacao_media > 70 ? '#d32f2f' : ($ocupacao_media > 40 ? '#ff8f00' : '#2e7d32'); ?>;"><?php echo $ocupacao_media; ?>%</div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;">Ocupação Média</div>
+                    </div>
+                    <div style="background: var(--bg-color); border-radius: 12px; padding: 14px 16px; border: 1px solid var(--border-color); text-align: center; overflow: hidden;">
+                        <div style="font-size: 0.82rem; font-weight: 800; color: #2e7d32; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<?php echo $prof_mais_livre ? htmlspecialchars($prof_mais_livre['nome']) : '-'; ?>"><?php echo $prof_mais_livre ? htmlspecialchars($prof_mais_livre['nome']) : '-'; ?></div>
+                        <div style="font-size: 0.65rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Mais Disponível</div>
+                        <div style="font-size: 0.75rem; font-weight: 700; color: #2e7d32;"><?php echo $prof_mais_livre ? round($prof_mais_livre['perc_livre']) . '% livre' : ''; ?></div>
+                    </div>
+                    <div style="background: var(--bg-color); border-radius: 12px; padding: 14px 16px; border: 1px solid var(--border-color); text-align: center; overflow: hidden;">
+                        <div style="font-size: 0.82rem; font-weight: 800; color: #d32f2f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="<?php echo $prof_mais_ocupado ? htmlspecialchars($prof_mais_ocupado['nome']) : '-'; ?>"><?php echo $prof_mais_ocupado ? htmlspecialchars($prof_mais_ocupado['nome']) : '-'; ?></div>
+                        <div style="font-size: 0.65rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Mais Ocupado</div>
+                        <div style="font-size: 0.75rem; font-weight: 700; color: #d32f2f;"><?php echo $prof_mais_ocupado ? round(100 - $prof_mais_ocupado['perc_livre']) . '% ocup.' : ''; ?></div>
+                    </div>
+                    <div style="background: var(--bg-color); border-radius: 12px; padding: 14px 16px; border: 1px solid var(--border-color); text-align: center;">
+                        <div style="font-size: 1.5rem; font-weight: 800; color: #9c27b0;"><?php echo $total_aulas_count; ?></div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;">Aulas Este Mês</div>
+                    </div>
+                </div>
+
+                <!-- Turno Distribution -->
+                <div style="padding: 16px 20px 0;">
+                    <div style="font-size: 0.75rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">
+                        <i class="fas fa-clock" style="color: var(--primary-red);"></i> Distribuição por Turno
+                    </div>
+                    <div style="display: flex; gap: 14px;">
+                        <div style="flex:1;">
+                            <div style="display:flex; justify-content:space-between; font-size:0.72rem; font-weight:700; margin-bottom:4px;">
+                                <span>☀ Manhã</span><span style="color:#ff8f00;"><?php echo $td_m; ?> aulas (<?php echo round(($td_m / $td_total) * 100); ?>%)</span>
+                            </div>
+                            <div style="height:8px; background:var(--border-color); border-radius:4px; overflow:hidden;">
+                                <div style="height:100%; width:<?php echo round(($td_m / $td_total) * 100); ?>%; background:linear-gradient(90deg,#ff8f00,#ffb74d); border-radius:4px; transition: width 0.5s;"></div>
+                            </div>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="display:flex; justify-content:space-between; font-size:0.72rem; font-weight:700; margin-bottom:4px;">
+                                <span>☁ Tarde</span><span style="color:#1976d2;"><?php echo $td_t; ?> aulas (<?php echo round(($td_t / $td_total) * 100); ?>%)</span>
+                            </div>
+                            <div style="height:8px; background:var(--border-color); border-radius:4px; overflow:hidden;">
+                                <div style="height:100%; width:<?php echo round(($td_t / $td_total) * 100); ?>%; background:linear-gradient(90deg,#1976d2,#64b5f6); border-radius:4px; transition: width 0.5s;"></div>
+                            </div>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="display:flex; justify-content:space-between; font-size:0.72rem; font-weight:700; margin-bottom:4px;">
+                                <span>☽ Noite</span><span style="color:#7b1fa2;"><?php echo $td_n; ?> aulas (<?php echo round(($td_n / $td_total) * 100); ?>%)</span>
+                            </div>
+                            <div style="height:8px; background:var(--border-color); border-radius:4px; overflow:hidden;">
+                                <div style="height:100%; width:<?php echo round(($td_n / $td_total) * 100); ?>%; background:linear-gradient(90deg,#7b1fa2,#ba68c8); border-radius:4px; transition: width 0.5s;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Improved Gantt: 8 professors with avatar, % bar, day segments -->
+                <div id="dash_view_gantt" class="dash-chart-container active" style="flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 16px 20px 20px; display: flex;">
+                    <div style="font-size: 0.75rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">
+                        <i class="fas fa-align-left" style="color: var(--primary-red);"></i> Mapa de Ocupação — <?php echo $dash_month_label; ?>
+                    </div>
                     <div class="dash-gantt-container" style="background: transparent; padding: 0;">
                         <div id="gantt_rows_container">
                             <?php if (empty($prof_availability)): ?>
                                 <p style="text-align:center; padding: 20px; opacity:0.5;">Nenhum professor encontrado.</p>
                             <?php
 else: ?>
-                                <?php foreach (array_slice($prof_availability, 0, 5) as $pa): ?>
-                                    <div class="dash-gantt-row" style="margin-bottom: 8px;">
-                                        <div class="dash-gantt-label" style="width: 110px; font-size: 0.75rem;"><?php echo htmlspecialchars($pa['nome']); ?></div>
+                                <?php foreach (array_slice($prof_availability, 0, 8) as $pa):
+        $ocu_perc = ($total_util > 0) ? round(($pa['dias_ocupados'] / $total_util) * 100) : 0;
+        $bar_color = $ocu_perc > 70 ? '#d32f2f' : ($ocu_perc > 40 ? '#ff8f00' : '#2e7d32');
+?>
+                                    <div class="dash-gantt-row" style="margin-bottom: 6px;">
+                                        <div style="width: 170px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-right: 8px;">
+                                            <div style="width:26px; height:26px; background: linear-gradient(135deg, #e53935, #c62828); color:#fff; border-radius:6px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.68rem; flex-shrink:0;"><?php echo mb_substr($pa['nome'], 0, 1); ?></div>
+                                            <div style="min-width:0; flex:1;">
+                                                <div class="dash-gantt-label" style="width:auto; font-size:0.72rem; margin:0;"><?php echo htmlspecialchars($pa['nome']); ?></div>
+                                                <div style="height:4px; background:var(--border-color); border-radius:2px; margin-top:2px; overflow:hidden;">
+                                                    <div style="height:100%; width:<?php echo $ocu_perc; ?>%; background:<?php echo $bar_color; ?>; border-radius:2px; transition: width 0.5s;"></div>
+                                                </div>
+                                            </div>
+                                            <span style="font-size:0.68rem; font-weight:800; color:<?php echo $bar_color; ?>; flex-shrink:0; min-width:28px; text-align:right;"><?php echo $ocu_perc; ?>%</span>
+                                        </div>
                                         <div class="dash-gantt-bar" style="height: 24px;">
                                             <?php for ($i = 1; $i <= $days_in_month; $i++):
             $dt = sprintf("%s-%02d", date('Y-m'), $i);
+            $dow = (int)date('N', strtotime($dt));
             $is_busy = $agenda_gantt[$pa['id']][$dt] ?? false;
-            $class = $is_busy ? 'gantt-seg-busy' : 'gantt-seg-free';
+            $is_weekend = ($dow >= 6);
+            $seg_class = $is_busy ? 'gantt-seg-busy' : 'gantt-seg-free';
+            if ($is_weekend && !$is_busy)
+                $seg_class .= ' gantt-seg-weekend';
 ?>
-                                                <div class="gantt-seg <?php echo $class; ?>"></div>
+                                                <div class="gantt-seg <?php echo $seg_class; ?>" title="Dia <?php echo $i; ?>: <?php echo $is_busy ? htmlspecialchars($is_busy) : ($is_weekend ? 'Fim de semana' : 'Livre'); ?>"></div>
                                             <?php
         endfor; ?>
                                         </div>
@@ -510,6 +667,11 @@ else: ?>
 endif; ?>
                         </div>
                     </div>
+                    <div style="display:flex; justify-content:center; gap:16px; margin-top:10px; font-size:0.72rem; font-weight:600; color:var(--text-muted);">
+                        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#d32f2f;margin-right:4px;vertical-align:middle;"></span>Ocupado</span>
+                        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2e7d32;margin-right:4px;vertical-align:middle;"></span>Livre</span>
+                        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2e7d32;opacity:0.5;margin-right:4px;vertical-align:middle;"></span>Fim de Semana</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -518,33 +680,69 @@ endif; ?>
             <div class="modal-content" style="max-width: 95%; width: 1400px; height: 90vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; border-radius: 20px; border: 1px solid var(--border-color); box-shadow: 0 20px 50px rgba(0,0,0,0.3);">
                 <div class="modal-header" style="padding: 20px 30px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: var(--card-bg);">
                     <div style="display: flex; align-items: center; gap: 20px;">
-                        <h2 style="margin: 0; display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--primary-red);">
-                            <i class="fas fa-chart-line"></i> Análise de Desempenho
+                        <h2 style="margin: 0; display: flex; align-items: center; gap: 10px; font-weight: 800; color: var(--primary-red); font-size: 1.2rem;">
+                            <div style="width: 38px; height: 38px; background: linear-gradient(135deg, #e53935, #c62828); border-radius: 10px; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 10px rgba(229,57,53,0.3);">
+                                <i class="fas fa-chart-line" style="color: #fff; font-size: 1rem;"></i>
+                            </div>
+                            Análise de Desempenho
                         </h2>
-                        <div class="view-selector" style="background: var(--bg-color); padding: 4px; border-radius: 12px; border: 1px solid var(--border-color);">
-                            <button onclick="switchModalChart('gantt')" class="view-btn active" id="modal_btn_gantt" style="border: none; border-radius: 8px;"><i class="fas fa-align-left"></i> Gantt</button>
-                            <button onclick="switchModalChart('donut')" class="view-btn" id="modal_btn_donut" style="border: none; border-radius: 8px;"><i class="fas fa-chart-pie"></i> Rosca</button>
-                            <button onclick="switchModalChart('bar')" class="view-btn" id="modal_btn_bar" style="border: none; border-radius: 8px;"><i class="fas fa-chart-bar"></i> Carga</button>
+                        <div class="chart-switcher" style="display: flex; background: var(--bg-color); padding: 4px; border-radius: 12px; border: 1px solid var(--border-color); gap: 4px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.04);">
+                            <button onclick="switchModalChart('gantt')" class="chart-switch-btn active" id="modal_btn_gantt">
+                                <i class="fas fa-align-left"></i> <span>Gantt</span>
+                            </button>
+                            <button onclick="switchModalChart('donut')" class="chart-switch-btn" id="modal_btn_donut">
+                                <i class="fas fa-chart-pie"></i> <span>Rosca</span>
+                            </button>
+                            <button onclick="switchModalChart('bar')" class="chart-switch-btn" id="modal_btn_bar">
+                                <i class="fas fa-chart-bar"></i> <span>Carga</span>
+                            </button>
                         </div>
                     </div>
-                    <button class="close-modal" onclick="closeModal('analyticModal')" style="position: static; font-size: 1.5rem; background: var(--bg-color); border: 1px solid var(--border-color); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-color); transition: 0.2s;">
+                    <button class="close-modal" onclick="closeModal('analyticModal')" style="position: static; font-size: 1.1rem; background: var(--bg-color); border: 1px solid var(--border-color); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-color); transition: all 0.2s;">
                         <i class="fas fa-times"></i>
                     </button>
+                    <style>
+                        .chart-switch-btn {
+                            padding: 8px 18px; border-radius: 10px; border: none; background: transparent;
+                            color: var(--text-muted); cursor: pointer; font-weight: 600; font-size: 0.85rem;
+                            transition: all 0.25s cubic-bezier(0.4,0,0.2,1); display: flex; align-items: center; gap: 8px;
+                            position: relative; overflow: hidden;
+                        }
+                        .chart-switch-btn::before {
+                            content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, #e53935, #c62828);
+                            opacity: 0; transition: opacity 0.25s; border-radius: 10px;
+                        }
+                        .chart-switch-btn.active {
+                            color: #fff; box-shadow: 0 3px 12px rgba(229,57,53,0.3);
+                        }
+                        .chart-switch-btn.active::before { opacity: 1; }
+                        .chart-switch-btn.active i, .chart-switch-btn.active span { position: relative; z-index: 1; }
+                        .chart-switch-btn:not(.active) i, .chart-switch-btn:not(.active) span { position: relative; z-index: 1; }
+                        .chart-switch-btn:not(.active):hover {
+                            background: rgba(0,0,0,0.05); color: var(--text-color);
+                        }
+                        [data-theme="dark"] .chart-switch-btn:not(.active):hover {
+                            background: rgba(255,255,255,0.08);
+                        }
+                    </style>
                 </div>
 
-                <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 30px; background: #f8f9fa;">
+                <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 30px; background: var(--bg-color);">
                     <!-- Gantt Premium Mode -->
                     <div id="modal_view_gantt" class="modal-chart-pane active">
                         <div class="premium-gantt-card">
                             <div class="gantt-header-dates">
-                                <div style="width: 200px;"></div>
+                                <div style="width: 220px; padding: 10px 16px; display: flex; align-items: center;">
+                                    <span style="font-weight: 800; font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Professor</span>
+                                </div>
                                 <div class="gantt-timeline-header">
                                     <?php for ($i = 1; $i <= $days_in_month; $i++):
     $dt = sprintf("%s-%02d", date('Y-m'), $i);
     $dow = date('N', strtotime($dt));
     $is_weekend = ($dow >= 6);
 ?>
-                                        <div class="gantt-day-header <?php echo $is_weekend ? 'is-weekend' : ''; ?>">
+                                        <?php $is_today_gantt = ($dt === date('Y-m-d')); ?>
+                                        <div class="gantt-day-header <?php echo $is_weekend ? 'is-weekend' : ''; ?> <?php echo $is_today_gantt ? 'is-today' : ''; ?>">
                                             <span><?php echo $i; ?></span>
                                         </div>
                                     <?php
@@ -596,34 +794,88 @@ endfor; ?>
                                                 <?php for ($i = 1; $i <= $days_in_month; $i++)
         echo "<div class='gantt-grid-line'></div>"; ?>
                                             </div>
+                                            <?php
+    // Today indicator line
+    $today_day = (int)date('d');
+    if ($today_day >= 1 && $today_day <= $days_in_month) {
+        $today_left = (($today_day - 0.5) / $days_in_month) * 100;
+        echo "<div class='gantt-today-line' style='left: {$today_left}%;'></div>";
+    }
+?>
                                         </div>
                                     </div>
                                 <?php
 endforeach; ?>
+                            </div>
+                            <div class="gantt-legend-row">
+                                <div class="gl-item"><div class="gl-box" style="background: linear-gradient(135deg, #e53935, #ff5252);"></div> Ocupado (Turma atribuída)</div>
+                                <div class="gl-item"><div class="gl-box" style="background: var(--card-bg); border: 1px solid var(--border-color);"></div> Disponível</div>
+                                <div class="gl-item"><div class="gl-box" style="background: rgba(0,0,0,0.03); border: 1px dashed var(--border-color);"></div> Final de semana</div>
+                                <div class="gl-item" style="color: #e53935; font-weight: 700;"><i class="fas fa-map-pin" style="font-size: 0.7rem;"></i> Hoje</div>
+                            </div>
+                            <?php
+// Calculate summary stats
+$total_gantt_busy = array_sum(array_column($prof_availability, 'dias_ocupados'));
+$total_gantt_free = array_sum(array_column($prof_availability, 'dias_livres'));
+$total_gantt_all = $total_gantt_busy + $total_gantt_free;
+$avg_occupancy = ($total_gantt_all > 0) ? round(($total_gantt_busy / $total_gantt_all) * 100) : 0;
+?>
+                            <div class="gantt-summary">
+                                <div class="gantt-summary-item">
+                                    <div class="gs-num" style="color: var(--primary-red);"><?php echo count($prof_availability); ?></div>
+                                    <div class="gs-label">Professores</div>
+                                </div>
+                                <div class="gantt-summary-item">
+                                    <div class="gs-num" style="color: #d32f2f;"><?php echo $total_gantt_busy; ?></div>
+                                    <div class="gs-label">Dias Ocupados</div>
+                                </div>
+                                <div class="gantt-summary-item">
+                                    <div class="gs-num" style="color: #2e7d32;"><?php echo $total_gantt_free; ?></div>
+                                    <div class="gs-label">Dias Livres</div>
+                                </div>
+                                <div class="gantt-summary-item">
+                                    <div class="gs-num" style="color: #ff8f00;"><?php echo $avg_occupancy; ?>%</div>
+                                    <div class="gs-label">Taxa Ocupação</div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- Donut Mode -->
                     <div id="modal_view_donut" class="modal-chart-pane" style="display: none;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; height: 100%; align-items: center;">
-                            <div style="position: relative;">
-                                <canvas id="modalDonutChart"></canvas>
-                                <div id="donutCenterText" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
-                                    <span style="font-size: 3rem; font-weight: 800; color: var(--primary-red);">0%</span>
-                                    <p style="margin: 0; font-size: 0.9rem; opacity: 0.7;">Livre</p>
-                                </div>
+                        <div style="background: var(--card-bg); border-radius: 16px; padding: 30px; border: 1px solid var(--border-color); box-shadow: 0 6px 30px rgba(0,0,0,0.08);">
+                            <div style="text-align: center; margin-bottom: 24px;">
+                                <h3 style="font-weight: 800; font-size: 1.1rem; color: var(--text-color); margin: 0;"><i class="fas fa-chart-pie" style="color: var(--primary-red); margin-right: 8px;"></i>Distribuição de Disponibilidade</h3>
+                                <p style="font-size: 0.82rem; color: var(--text-muted); margin: 4px 0 0;">Relação entre dias ocupados e livres dos professores</p>
                             </div>
-                            <div id="donutLegend" class="donut-legend-grid">
-                                <!-- JS Populated -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center;">
+                                <div style="position: relative; max-width: 380px; margin: 0 auto;">
+                                    <canvas id="modalDonutChart"></canvas>
+                                    <div id="donutCenterText" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+                                        <span style="font-size: 2.8rem; font-weight: 800; color: var(--primary-red); line-height: 1;">0%</span>
+                                        <p style="margin: 4px 0 0; font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">Disponível</p>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style="font-weight: 700; font-size: 0.9rem; margin-bottom: 14px; color: var(--text-color);">Top Professores</div>
+                                    <div id="donutLegend" class="donut-legend-grid">
+                                        <!-- JS Populated -->
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- Bar Mode -->
                     <div id="modal_view_bar" class="modal-chart-pane" style="display: none;">
-                        <div style="height: 500px;">
-                            <canvas id="modalBarChart"></canvas>
+                        <div style="background: var(--card-bg); border-radius: 16px; padding: 30px; border: 1px solid var(--border-color); box-shadow: 0 6px 30px rgba(0,0,0,0.08);">
+                            <div style="text-align: center; margin-bottom: 24px;">
+                                <h3 style="font-weight: 800; font-size: 1.1rem; color: var(--text-color); margin: 0;"><i class="fas fa-chart-bar" style="color: #1976d2; margin-right: 8px;"></i>Carga de Trabalho por Professor</h3>
+                                <p style="font-size: 0.82rem; color: var(--text-muted); margin: 4px 0 0;">Comparação entre dias ocupados e disponíveis no mês atual</p>
+                            </div>
+                            <div style="height: 480px;">
+                                <canvas id="modalBarChart"></canvas>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -632,41 +884,74 @@ endforeach; ?>
 
         <style>
             /* Premium Gantt Styles */
-            .premium-gantt-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); overflow: hidden; }
-            .gantt-header-dates { display: flex; background: #f1f3f5; border-bottom: 2px solid #dee2e6; }
+            .premium-gantt-card { background: var(--card-bg); border-radius: 16px; box-shadow: 0 6px 30px rgba(0,0,0,0.08); overflow: hidden; border: 1px solid var(--border-color); }
+            .gantt-header-dates { display: flex; background: linear-gradient(135deg, #f8f9fa, #e9ecef); border-bottom: 2px solid #dee2e6; position: sticky; top: 0; z-index: 10; }
+            [data-theme="dark"] .gantt-header-dates { background: linear-gradient(135deg, #2a2a2a, #1e1e1e); border-bottom-color: #444; }
             .gantt-timeline-header { flex: 1; display: flex; }
-            .gantt-day-header { flex: 1; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 800; color: #495057; border-left: 1px solid #dee2e6; }
-            .gantt-day-header.is-weekend { background: #e9ecef; }
+            .gantt-day-header { flex: 1; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 800; color: var(--text-muted); border-left: 1px solid rgba(0,0,0,0.06); transition: background 0.15s; }
+            .gantt-day-header.is-weekend { background: rgba(0,0,0,0.04); color: #e53935; }
+            [data-theme="dark"] .gantt-day-header.is-weekend { background: rgba(255,255,255,0.04); }
+            .gantt-day-header.is-today { background: rgba(237,28,36,0.12); color: #e53935; font-weight: 900; position: relative; }
+            .gantt-day-header.is-today::after { content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 6px; height: 3px; border-radius: 3px 3px 0 0; background: #e53935; }
             
-            .premium-gantt-row { display: flex; border-bottom: 1px solid #f1f3f5; min-height: 60px; }
-            .gantt-prof-info { width: 200px; padding: 10px 15px; display: flex; align-items: center; gap: 10px; border-right: 2px solid #dee2e6; background: #fff; }
-            .prof-avatar { width: 32px; height: 32px; background: var(--primary-red); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.8rem; }
-            .prof-det { display: flex; flex-direction: column; overflow: hidden; }
-            .p-name { font-weight: 700; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            .p-spec { font-size: 0.7rem; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .premium-gantt-row { display: flex; border-bottom: 1px solid rgba(0,0,0,0.04); min-height: 64px; transition: background 0.15s; }
+            .premium-gantt-row:hover { background: rgba(237,28,36,0.02); }
+            [data-theme="dark"] .premium-gantt-row { border-bottom-color: rgba(255,255,255,0.04); }
+            [data-theme="dark"] .premium-gantt-row:hover { background: rgba(237,28,36,0.05); }
+            .premium-gantt-row:last-child { border-bottom: none; }
+            .gantt-prof-info { width: 220px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-right: 2px solid rgba(0,0,0,0.06); background: var(--card-bg); flex-shrink: 0; }
+            [data-theme="dark"] .gantt-prof-info { border-right-color: rgba(255,255,255,0.06); }
+            .prof-avatar { width: 36px; height: 36px; background: linear-gradient(135deg, #e53935, #c62828); color: #fff; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem; box-shadow: 0 3px 8px rgba(229,57,53,0.3); flex-shrink: 0; }
+            .prof-det { display: flex; flex-direction: column; overflow: hidden; gap: 2px; }
+            .p-name { font-weight: 700; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-color); }
+            .p-spec { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             
-            .gantt-track { flex: 1; position: relative; background: #fff; }
+            .gantt-track { flex: 1; position: relative; background: var(--card-bg); min-height: 64px; }
             .gantt-grid-overlay { position: absolute; inset: 0; display: flex; pointer-events: none; }
-            .gantt-grid-line { flex: 1; border-right: 1px solid #f1f3f5; height: 100%; }
+            .gantt-grid-line { flex: 1; border-right: 1px solid rgba(0,0,0,0.03); height: 100%; }
+            [data-theme="dark"] .gantt-grid-line { border-right-color: rgba(255,255,255,0.03); }
+            .gantt-grid-line:nth-child(7n+6), .gantt-grid-line:nth-child(7n) { background: rgba(0,0,0,0.015); }
+            [data-theme="dark"] .gantt-grid-line:nth-child(7n+6), [data-theme="dark"] .gantt-grid-line:nth-child(7n) { background: rgba(255,255,255,0.015); }
             
             .gantt-task-bar { 
-                position: absolute; top: 12px; bottom: 12px; border-radius: 20px; 
-                background: linear-gradient(90deg, #d32f2f, #ff5252); color: #fff;
-                display: flex; align-items: center; padding: 0 15px; font-size: 0.7rem; font-weight: 700;
-                box-shadow: 0 4px 8px rgba(211, 47, 47, 0.3); z-index: 2;
-                transition: transform 0.2s; cursor: pointer;
+                position: absolute; top: 14px; bottom: 14px; border-radius: 8px; 
+                background: linear-gradient(135deg, #e53935 0%, #ff5252 50%, #ff8a80 100%); color: #fff;
+                display: flex; align-items: center; padding: 0 12px; font-size: 0.7rem; font-weight: 700;
+                box-shadow: 0 3px 12px rgba(229,57,53,0.35), inset 0 1px 0 rgba(255,255,255,0.2); z-index: 2;
+                transition: transform 0.2s cubic-bezier(0.4,0,0.2,1), box-shadow 0.2s; cursor: pointer;
+                border: 1px solid rgba(255,255,255,0.15);
             }
-            .gantt-task-bar:hover { transform: scaleY(1.1); z-index: 3; }
-            .bar-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .gantt-task-bar:hover { transform: translateY(-2px) scaleY(1.08); z-index: 3; box-shadow: 0 6px 20px rgba(229,57,53,0.4); }
+            .bar-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+
+            /* Today indicator line */
+            .gantt-today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #e53935; z-index: 5; pointer-events: none; }
+            .gantt-today-line::before { content: ''; position: absolute; top: -4px; left: -4px; width: 10px; height: 10px; background: #e53935; border-radius: 50%; }
 
             /* Modal Pane visibility */
             .modal-chart-pane { height: 100%; }
-            
-            .donut-legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-            .legend-card { background: #fff; padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px; }
-            .l-dot { width: 8px; height: 8px; border-radius: 50%; }
-            .l-name { font-weight: 700; font-size: 0.8rem; flex: 1; }
-            .l-val { font-weight: 800; color: var(--primary-red); }
+            .modal-chart-pane { animation: fadeInChart 0.3s ease forwards; }
+            @keyframes fadeInChart { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+            /* Donut chart styles */
+            .donut-legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            .legend-card { background: var(--card-bg); padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; transition: transform 0.2s, box-shadow 0.2s; }
+            .legend-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
+            .l-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+            .l-name { font-weight: 700; font-size: 0.82rem; flex: 1; color: var(--text-color); }
+            .l-val { font-weight: 800; color: var(--primary-red); font-size: 0.95rem; }
+
+            /* Gantt legend row */
+            .gantt-legend-row { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 14px 20px; background: linear-gradient(135deg, rgba(0,0,0,0.01), rgba(0,0,0,0.03)); border-top: 1px solid rgba(0,0,0,0.05); }
+            [data-theme="dark"] .gantt-legend-row { background: linear-gradient(135deg, rgba(255,255,255,0.01), rgba(255,255,255,0.03)); border-top-color: rgba(255,255,255,0.05); }
+            .gantt-legend-row .gl-item { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; font-weight: 600; color: var(--text-muted); }
+            .gantt-legend-row .gl-box { width: 14px; height: 14px; border-radius: 4px; }
+
+            /* Summary stats row */
+            .gantt-summary { display: flex; gap: 16px; padding: 16px 20px; background: var(--bg-color); border-top: 1px solid var(--border-color); }
+            .gantt-summary-item { flex: 1; text-align: center; padding: 12px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border-color); }
+            .gantt-summary-item .gs-num { font-size: 1.4rem; font-weight: 800; }
+            .gantt-summary-item .gs-label { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
         </style>
 
         <!-- Sidebar: Cities & Upcoming -->
@@ -753,7 +1038,7 @@ function switchModalChart(mode) {
         el.style.display = 'none';
         el.classList.remove('active');
     });
-    document.querySelectorAll('.modal-header .view-btn').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.chart-switch-btn').forEach(el => el.classList.remove('active'));
     
     const pane = document.getElementById('modal_view_' + mode);
     if (pane) {
@@ -785,17 +1070,31 @@ $perc_total_livre = ($total_days_all > 0) ? round(($total_free_all / $total_days
             labels: ['Ocupado', 'Livre'],
             datasets: [{
                 data: [<?php echo $total_busy_all; ?>, <?php echo $total_free_all; ?>],
-                backgroundColor: ['#d32f2f', '#4CAF50'],
-                hoverOffset: 15,
-                borderWidth: 0
+                backgroundColor: ['#e53935', '#43a047'],
+                hoverBackgroundColor: ['#c62828', '#2e7d32'],
+                hoverOffset: 20,
+                borderWidth: 3,
+                borderColor: 'var(--card-bg)',
+                borderRadius: 6,
             }]
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            cutout: '80%',
-            animation: { animateScale: true, animateRotate: true }
+            maintainAspectRatio: true,
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    titleFont: { weight: 'bold', size: 13 },
+                    bodyFont: { size: 12 },
+                    padding: 14,
+                    cornerRadius: 10,
+                    displayColors: true,
+                    boxPadding: 6
+                }
+            },
+            cutout: '78%',
+            animation: { animateScale: true, animateRotate: true, duration: 800, easing: 'easeOutQuart' }
         }
     });
 
@@ -804,8 +1103,8 @@ $perc_total_livre = ($total_days_all > 0) ? round(($total_free_all / $total_days
     let legendHtml = '';
     <?php foreach ($top_available as $tp): ?>
         legendHtml += `
-            <div class="legend-card" style="box-shadow: 0 4px 10px rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.05);">
-                <div class="l-dot" style="background: <?php echo $tp['perc_livre'] > 50 ? '#4CAF50' : '#d32f2f'; ?>;"></div>
+            <div class="legend-card">
+                <div class="l-dot" style="background: <?php echo $tp['perc_livre'] > 50 ? '#43a047' : '#e53935'; ?>;"></div>
                 <div class="l-name"><?php echo htmlspecialchars($tp['nome']); ?></div>
                 <div class="l-val"><?php echo round($tp['perc_livre']); ?>%</div>
             </div>`;
@@ -832,20 +1131,44 @@ function initModalBarChart() {
         data: {
             labels: labels,
             datasets: [
-                { label: 'Ocupado', data: busyData, backgroundColor: '#d32f2f', borderRadius: 8 },
-                { label: 'Livre', data: freeData, backgroundColor: '#4CAF50', borderRadius: 8 }
+                { label: 'Ocupado', data: busyData, backgroundColor: '#e53935', borderRadius: 6, borderSkipped: false, barPercentage: 0.7, categoryPercentage: 0.8 },
+                { label: 'Livre', data: freeData, backgroundColor: '#43a047', borderRadius: 6, borderSkipped: false, barPercentage: 0.7, categoryPercentage: 0.8 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                x: { stacked: true, grid: { display: false } },
-                y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } }
+                x: { 
+                    stacked: true, 
+                    grid: { display: false },
+                    ticks: { font: { weight: 'bold', size: 11 }, maxRotation: 45, minRotation: 25 },
+                    border: { display: false }
+                },
+                y: { 
+                    stacked: true, 
+                    beginAtZero: true, 
+                    grid: { color: 'rgba(0,0,0,0.04)', drawBorder: false },
+                    ticks: { font: { weight: '600' }, stepSize: 2 },
+                    border: { display: false }
+                }
             },
             plugins: { 
-                legend: { position: 'top', labels: { usePointStyle: true, font: { weight: 'bold' } } } 
-            }
+                legend: { 
+                    position: 'top', 
+                    labels: { usePointStyle: true, pointStyle: 'rectRounded', font: { weight: 'bold', size: 12 }, padding: 20, boxWidth: 12 } 
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    titleFont: { weight: 'bold', size: 13 },
+                    bodyFont: { size: 12 },
+                    padding: 14,
+                    cornerRadius: 10,
+                    displayColors: true,
+                    boxPadding: 6
+                }
+            },
+            animation: { duration: 800, easing: 'easeOutQuart' }
         }
     });
 }

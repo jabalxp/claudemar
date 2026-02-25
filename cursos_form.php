@@ -1,16 +1,18 @@
 <?php
 
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 include 'includes/header.php';
 
 
 $id = isset($_GET['id']) ? $_GET['id'] : null;
-$curso = ['nome' => '', 'carga_horaria' => ''];
+$curso = ['nome' => '', 'carga_horaria' => '', 'tipo' => '', 'area' => ''];
 
 if ($id) {
-    $stmt = $pdo->prepare("SELECT * FROM cursos WHERE id = ?");
-    $stmt->execute([$id]);
-    $curso = $stmt->fetch();
+    $stmt = $mysqli->prepare("SELECT * FROM cursos WHERE id = ?");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    $curso = $stmt->get_result()->fetch_assoc();
     if (!$curso) {
         header("Location: cursos.php");
         exit;
@@ -32,9 +34,19 @@ if ($id) {
             <input type="text" name="nome" value="<?php echo htmlspecialchars($curso['nome']); ?>" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
         </div>
 
-        <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Carga Horária (Total de Horas)</label>
-            <input type="number" name="carga_horaria" value="<?php echo $curso['carga_horaria']; ?>" required min="1" step="1" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Tipo</label>
+                <input type="text" name="tipo" value="<?php echo htmlspecialchars($curso['tipo'] ?? ''); ?>" placeholder="Ex: FIC, Técnico" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Área</label>
+                <input type="text" name="area" value="<?php echo htmlspecialchars($curso['area'] ?? ''); ?>" placeholder="Ex: AUTOMOTIVA" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Carga Horária (h)</label>
+                <input type="number" name="carga_horaria" value="<?php echo $curso['carga_horaria']; ?>" required min="1" step="1" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
+            </div>
         </div>
 
         <div style="text-align: right;">

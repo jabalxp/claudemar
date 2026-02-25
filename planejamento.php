@@ -1,18 +1,18 @@
-<?php 
+<?php
+
 require_once 'includes/db.php';
-include 'includes/header.php'; 
+require_once 'includes/auth.php';
+include 'includes/header.php';
+
 
 // Fetch Turmas with Curso Name
-$stmt_turmas = $pdo->query("SELECT t.id, t.nome, c.nome as curso_nome, t.data_inicio, t.data_fim, t.turno FROM turmas t JOIN cursos c ON t.curso_id = c.id ORDER BY t.data_inicio DESC");
-$turmas = $stmt_turmas->fetchAll();
+$turmas = $mysqli->query("SELECT t.id, t.nome, c.nome as curso_nome, t.data_inicio, t.data_fim, t.turno FROM turmas t JOIN cursos c ON t.curso_id = c.id ORDER BY t.data_inicio DESC")->fetch_all(MYSQLI_ASSOC);
 
 // Fetch Professors
-$stmt_prof = $pdo->query("SELECT id, nome FROM professores ORDER BY nome ASC");
-$professores = $stmt_prof->fetchAll();
+$professores = $mysqli->query("SELECT id, nome FROM professores ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 
 // Fetch Rooms
-$stmt_salas = $pdo->query("SELECT id, nome FROM salas ORDER BY nome ASC");
-$salas = $stmt_salas->fetchAll();
+$salas = $mysqli->query("SELECT id, nome FROM salas ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <div class="page-header" style="margin-bottom: 20px;">
@@ -35,19 +35,42 @@ $salas = $stmt_salas->fetchAll();
                                 data-turno="<?php echo $t['turno']; ?>">
                             <?php echo htmlspecialchars($t['nome']); ?> (<?php echo htmlspecialchars($t['curso_nome']); ?>)
                         </option>
-                    <?php endforeach; ?>
+                    <?php
+endforeach; ?>
                 </select>
             </div>
 
-            <!-- Professor Selection -->
+            <!-- Professors Selection -->
             <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Professor Responsável</label>
-                <select name="professor_id" required style="width: 100%; padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color);">
-                    <option value="">Selecione o professor...</option>
-                    <?php foreach ($professores as $p): ?>
-                        <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Professores Responsáveis (Até 4)</label>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <select name="professor_id" required style="width: 100%; padding: 12px; border-radius: 6px; border: 2px solid var(--primary-red); background: var(--card-bg); color: var(--text-color); font-weight: 600;">
+                        <option value="">1º Professor (Obrigatório)...</option>
+                        <?php foreach ($professores as $p): ?>
+                            <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <select name="professor_id_2" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
+                            <option value="">2º Prof. (Opcional)</option>
+                            <?php foreach ($professores as $p): ?>
+                                <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <select name="professor_id_3" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
+                            <option value="">3º Prof. (Opcional)</option>
+                            <?php foreach ($professores as $p): ?>
+                                <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <select name="professor_id_4" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
+                            <option value="">4º Prof. (Opcional)</option>
+                            <?php foreach ($professores as $p): ?>
+                                <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -59,7 +82,8 @@ $salas = $stmt_salas->fetchAll();
                     <option value="">Selecione a sala...</option>
                     <?php foreach ($salas as $s): ?>
                         <option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['nome']); ?></option>
-                    <?php endforeach; ?>
+                    <?php
+endforeach; ?>
                 </select>
             </div>
 
@@ -77,14 +101,15 @@ $salas = $stmt_salas->fetchAll();
         <div style="margin-bottom: 20px;">
             <label style="display: block; margin-bottom: 10px; font-weight: 600;">Dias da Semana</label>
             <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                <?php 
-                $dias = [1 => 'Segunda', 2 => 'Terça', 3 => 'Quarta', 4 => 'Quinta', 5 => 'Sexta', 6 => 'Sábado'];
-                foreach ($dias as $num => $nome): ?>
+                <?php
+$dias = [1 => 'Segunda', 2 => 'Terça', 3 => 'Quarta', 4 => 'Quinta', 5 => 'Sexta', 6 => 'Sábado'];
+foreach ($dias as $num => $nome): ?>
                     <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
                         <input type="checkbox" name="dias_semana[]" value="<?php echo $num; ?>" <?php echo $num <= 5 ? 'checked' : ''; ?>>
                         <?php echo $nome; ?>
                     </label>
-                <?php endforeach; ?>
+                <?php
+endforeach; ?>
             </div>
         </div>
 

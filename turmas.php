@@ -1,14 +1,14 @@
 <?php 
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 include 'includes/header.php'; 
 
-$stmt = $pdo->query("
+$turmas = $mysqli->query("
     SELECT t.*, c.nome as curso_nome 
     FROM turmas t 
     JOIN cursos c ON t.curso_id = c.id 
     ORDER BY t.cidade ASC, t.data_inicio DESC
-");
-$turmas = $stmt->fetchAll();
+")->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -58,7 +58,9 @@ $turmas = $stmt->fetchAll();
                     </td>
                     <td>
                         <a href="turmas_form.php?id=<?php echo $t['id']; ?>" class="btn" style="padding: 5px 10px; background: #ffc107; color: #000;"><i class="fas fa-edit"></i></a>
+                        <?php if (can_delete()): ?>
                         <a href="turmas_process.php?action=delete&id=<?php echo $t['id']; ?>" class="btn" style="padding: 5px 10px; background: #dc3545; color: #fff;" onclick="return confirm('Tem certeza que deseja excluir?')"><i class="fas fa-trash"></i></a>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; ?>

@@ -6,17 +6,13 @@ $pass = ''; // Default XAMPP password is empty
 $charset = 'utf8mb4';
 $port = 3308; // Default MySQL port
 
-$dsn = "mysql:host=$host;port=$port;dbname=$db;charset=$charset";
-$options = [
-     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-     PDO::ATTR_EMULATE_PREPARES => false,
-];
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 try {
-     $pdo = new PDO($dsn, $user, $pass, $options);
+     $mysqli = new mysqli($host, $user, $pass, $db, $port);
+     $mysqli->set_charset($charset);
 }
-catch (\PDOException $e) {
+catch (mysqli_sql_exception $e) {
      die("Erro ao conectar ao banco de dados: " . $e->getMessage());
 }
 

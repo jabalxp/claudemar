@@ -1,5 +1,6 @@
 <?php
 require_once 'includes/db.php';
+require_once 'includes/auth.php';
 include 'includes/header.php';
 
 // Helper for date navigation
@@ -17,12 +18,12 @@ for ($i = 0; $i < 6; $i++) {
     ];
 }
 
-$salas = $pdo->query("SELECT id, nome FROM salas ORDER BY nome ASC")->fetchAll();
+$salas = $mysqli->query("SELECT id, nome FROM salas ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 
 if ($sala_id) {
     // Fetch agenda for this sala and this week
     $sunday = date('Y-m-d', strtotime("$monday +6 days"));
-    $stmt = $pdo->prepare("
+    $stmt = $mysqli->prepare("
         SELECT a.*, t.nome as turma_nome, p.nome as professor_nome, p.cor_agenda 
         FROM agenda a 
         JOIN turmas t ON a.turma_id = t.id 
@@ -30,8 +31,9 @@ if ($sala_id) {
         WHERE a.sala_id = ? AND a.data BETWEEN ? AND ?
         ORDER BY a.hora_inicio ASC
     ");
-    $stmt->execute([$sala_id, $monday, $sunday]);
-    $aulas = $stmt->fetchAll();
+    $stmt->bind_param('iss', $sala_id, $monday, $sunday);
+    $stmt->execute();
+    $aulas = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
     // Group by date
     $agenda_data = [];
