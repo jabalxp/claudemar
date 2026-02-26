@@ -274,9 +274,9 @@ $all_profs = $mysqli->query("SELECT id, nome FROM professores ORDER BY nome ASC"
     .turno-dot { flex: 1; min-height: 6px; border-radius: 1px; }
     .turno-occ { background: #e53935; }
     .turno-avl { background: #4caf50; }
-    .turno-blk { background: #ff9800; }
+    .turno-blk { background: #e0e0e0; }
     .turno-partial { background: #f9a825; }
-    .turno-wknd { background: #e0e0e0; }
+    .turno-wknd { background: #9c9c9c; }
     .turno-labels { display: flex; justify-content: space-between; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); margin-top: 4px; padding: 0 4px; }
 
     .turno-summary { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
@@ -730,7 +730,7 @@ else: ?>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#4caf50;border-radius:1px;"></span> Livre</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#f9a825;border-radius:1px;"></span> Parcial</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#e53935;border-radius:1px;"></span> Ocup.</span>
-                        <span><span style="display:inline-block;width:8px;height:8px;background:#ff9800;border-radius:1px;"></span> Bloq.</span>
+                        <span><span style="display:inline-block;width:8px;height:8px;background:#e0e0e0;border-radius:1px;"></span> Bloq.</span>
                     </span>
                 </div>
 
@@ -870,7 +870,7 @@ else: ?>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#4caf50;border-radius:1px;"></span> Livre</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#f9a825;border-radius:1px;"></span> Parcial</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#e53935;border-radius:1px;"></span> Ocup.</span>
-                        <span><span style="display:inline-block;width:8px;height:8px;background:#ff9800;border-radius:1px;"></span> Bloq.</span>
+                        <span><span style="display:inline-block;width:8px;height:8px;background:#e0e0e0;border-radius:1px;"></span> Bloq.</span>
                     </span>
                 </div>
 
@@ -925,7 +925,7 @@ endif; ?>
                 <span style="display:flex;gap:2px;">
                     <span style="width:10px;height:6px;border-radius:2px;background:#e53935;display:block;"></span>
                     <span style="width:10px;height:6px;border-radius:2px;background:#4caf50;display:block;"></span>
-                    <span style="width:10px;height:6px;border-radius:2px;background:#ff9800;display:block;"></span>
+                    <span style="width:10px;height:6px;border-radius:2px;background:#e0e0e0;display:block;"></span>
                 </span>
                 <span>Turnos (M·T·N)</span>
             </div>
@@ -1187,9 +1187,9 @@ function renderCalendarView(profId, profNome, monthStr, busyDays, targetContaine
         // Turno indicator dots for this day
         let turnoHtml = '';
         if (!isSunday && isBusy && turno) {
-            const mColor = hasM ? '#e53935' : (hasN ? '#ff9800' : '#4caf50');
+            const mColor = hasM ? '#e53935' : (hasN ? '#e0e0e0' : '#4caf50');
             const tColor = hasT ? '#e53935' : '#4caf50';
-            const nColor = hasN ? '#e53935' : (hasM ? '#ff9800' : '#4caf50');
+            const nColor = hasN ? '#e53935' : (hasM ? '#e0e0e0' : '#4caf50');
             turnoHtml = `<div style="display:flex;gap:3px;margin-top:4px;">
                 <span title="Manhã: ${hasM ? 'Ocupado' : (hasN ? 'Bloqueado' : 'Livre')}" style="width:10px;height:6px;border-radius:2px;background:${mColor};"></span>
                 <span title="Tarde: ${hasT ? 'Ocupado' : 'Livre'}" style="width:10px;height:6px;border-radius:2px;background:${tColor};"></span>
