@@ -108,6 +108,105 @@ if (isset($_GET['ajax_profs_by_specialty'])) {
     exit;
 }
 
+// --- AJAX HANDLER FOR RESERVATIONS CHECK (per professor per month) ---
+if (isset($_GET['ajax_reservas_check'])) {
+    $prof_id = (int)$_GET['prof_id'];
+    $month = $_GET['month']; // Y-m
+    $f_day = $month . '-01';
+    $l_day = date('Y-m-t', strtotime($f_day));
+
+    $st = $mysqli->prepare("
+        SELECT r.*, u.nome as gestor_nome
+        FROM reservas r
+        JOIN usuarios u ON r.usuario_id = u.id
+        WHERE r.professor_id = ? AND r.status = 'ativo'
+        AND r.data_inicio <= ? AND r.data_fim >= ?
+    ");
+    $st->bind_param('iss', $prof_id, $l_day, $f_day);
+    $st->execute();
+    $reservas = $st->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $reserved_dates = [];
+    foreach ($reservas as $r) {
+        $dias_arr = explode(',', $r['dias_semana']);
+        $cur = new DateTime(max($r['data_inicio'], $f_day));
+        $end = new DateTime(min($r['data_fim'], $l_day));
+        $end->modify('+1 day');
+        while ($cur < $end) {
+            $dow = $cur->format('N');
+            if (in_array($dow, $dias_arr)) {
+                $d = $cur->format('Y-m-d');
+                $reserved_dates[$d] = [
+                    'reserva_id' => $r['id'],
+                    'gestor' => $r['gestor_nome'],
+                    'hora_inicio' => $r['hora_inicio'],
+                    'hora_fim' => $r['hora_fim'],
+                    'own' => ($r['usuario_id'] == $auth_user_id),
+                    'notas' => $r['notas']
+                ];
+            }
+            $cur->modify('+1 day');
+        }
+    }
+
+    header('Content-Type: application/json');
+    echo json_encode(['ok' => true, 'reserved' => $reserved_dates]);
+    exit;
+}
+
+// --- AJAX HANDLER FOR CREATING RESERVATION ---
+if (isset($_POST['ajax_create_reserva'])) {
+    header('Content-Type: application/json');
+    if (!can_edit()) {
+        echo json_encode(['ok' => false, 'error' => 'Sem permissão.']);
+        exit;
+    }
+
+    $professor_id = (int)$_POST['professor_id'];
+    $data_inicio = $_POST['data_inicio'];
+    $data_fim = $_POST['data_fim'];
+    $dias_semana = $_POST['dias_semana']; // "1,3,5"
+    $hora_inicio = $_POST['hora_inicio'];
+    $hora_fim = $_POST['hora_fim'];
+    $notas = $_POST['notas'] ?? '';
+    $usuario_id = $auth_user_id;
+
+    if (!$professor_id || !$data_inicio || !$data_fim || !$dias_semana || !$hora_inicio || !$hora_fim) {
+        echo json_encode(['ok' => false, 'error' => 'Dados incompletos.']);
+        exit;
+    }
+
+    // Check conflicts with other gestors' reservations
+    $dias_arr = explode(',', $dias_semana);
+    $st = $mysqli->prepare("
+        SELECT r.*, u.nome as gestor_nome FROM reservas r
+        JOIN usuarios u ON r.usuario_id = u.id
+        WHERE r.professor_id = ? AND r.status = 'ativo' AND r.usuario_id != ?
+        AND r.data_inicio <= ? AND r.data_fim >= ?
+        AND (r.hora_inicio < ? AND r.hora_fim > ?)
+    ");
+    $st->bind_param('iissss', $professor_id, $usuario_id, $data_fim, $data_inicio, $hora_fim, $hora_inicio);
+    $st->execute();
+    $conflicts = $st->get_result()->fetch_all(MYSQLI_ASSOC);
+    foreach ($conflicts as $c) {
+        $c_dias = explode(',', $c['dias_semana']);
+        $overlap = array_intersect($dias_arr, $c_dias);
+        if (!empty($overlap)) {
+            $dow_names = [1 => 'Seg', 2 => 'Ter', 3 => 'Qua', 4 => 'Qui', 5 => 'Sex', 6 => 'Sáb'];
+            $names = array_map(function ($d) use ($dow_names) { return $dow_names[$d] ?? $d; }, $overlap);
+            echo json_encode(['ok' => false, 'error' => "Conflito: \"{$c['gestor_nome']}\" já reservou este professor em " . implode(', ', $names) . " ({$c['data_inicio']} a {$c['data_fim']})."]);
+            exit;
+        }
+    }
+
+    $st2 = $mysqli->prepare("INSERT INTO reservas (professor_id, usuario_id, data_inicio, data_fim, dias_semana, hora_inicio, hora_fim, notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    $st2->bind_param('iissssss', $professor_id, $usuario_id, $data_inicio, $data_fim, $dias_semana, $hora_inicio, $hora_fim, $notas);
+    $st2->execute();
+
+    echo json_encode(['ok' => true, 'id' => $mysqli->insert_id, 'msg' => 'Professor reservado com sucesso!']);
+    exit;
+}
+
 // --- AJAX HANDLER FOR TIMELINE DATA ---
 if (isset($_GET['ajax_availability'])) {
     $prof_id = (int)$_GET['prof_id'];
@@ -142,8 +241,39 @@ if (isset($_GET['ajax_availability'])) {
             $turnos[$row['data']]['N'] = true;
     }
 
+    // Also fetch reservations for this professor/month
+    $st_res = $mysqli->prepare("
+        SELECT r.*, u.nome as gestor_nome FROM reservas r
+        JOIN usuarios u ON r.usuario_id = u.id
+        WHERE r.professor_id = ? AND r.status = 'ativo'
+        AND r.data_inicio <= ? AND r.data_fim >= ?
+    ");
+    $st_res->bind_param('iss', $prof_id, $l_day, $f_day);
+    $st_res->execute();
+    $res_rows = $st_res->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $reserved = [];
+    foreach ($res_rows as $rr) {
+        $dias_arr = explode(',', $rr['dias_semana']);
+        $cur = new DateTime(max($rr['data_inicio'], $f_day));
+        $end = new DateTime(min($rr['data_fim'], $l_day));
+        $end->modify('+1 day');
+        while ($cur < $end) {
+            $dow = $cur->format('N');
+            if (in_array($dow, $dias_arr)) {
+                $d = $cur->format('Y-m-d');
+                $reserved[$d] = [
+                    'gestor' => $rr['gestor_nome'],
+                    'own' => ($rr['usuario_id'] == $auth_user_id),
+                    'hora' => $rr['hora_inicio'] . '-' . $rr['hora_fim']
+                ];
+            }
+            $cur->modify('+1 day');
+        }
+    }
+
     header('Content-Type: application/json');
-    echo json_encode(['busy' => $busy, 'turnos' => $turnos]);
+    echo json_encode(['busy' => $busy, 'turnos' => $turnos, 'reserved' => $reserved]);
     exit;
 }
 
@@ -296,6 +426,45 @@ $turmas_select = $mysqli->query("SELECT t.id, t.nome, c.nome as curso_nome FROM 
 $salas_select = $mysqli->query("SELECT id, nome FROM salas ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 $all_profs = $mysqli->query("SELECT id, nome, especialidade FROM professores ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
 $all_especialidades_modal = $mysqli->query("SELECT DISTINCT especialidade FROM professores WHERE especialidade IS NOT NULL AND especialidade != '' ORDER BY especialidade ASC")->fetch_all(MYSQLI_ASSOC);
+
+// ── LOAD RESERVATION DATA FOR CURRENT PROFESSORS ──
+$reserva_data = []; // prof_id => date => {gestor, own, hora}
+if (!empty($prof_ids)) {
+    $placeholders_r = implode(',', array_fill(0, count($prof_ids), '?'));
+    $stmt_reservas = $mysqli->prepare("
+        SELECT r.*, u.nome as gestor_nome
+        FROM reservas r
+        JOIN usuarios u ON r.usuario_id = u.id
+        WHERE r.professor_id IN ($placeholders_r) AND r.status = 'ativo'
+        AND r.data_inicio <= ? AND r.data_fim >= ?
+    ");
+    $params_r = array_merge($prof_ids, [$last_day, $first_day]);
+    $types_r = str_repeat('i', count($prof_ids)) . 'ss';
+    $stmt_reservas->bind_param($types_r, ...$params_r);
+    $stmt_reservas->execute();
+    $res_results = $stmt_reservas->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    foreach ($res_results as $rr) {
+        $dias_arr = explode(',', $rr['dias_semana']);
+        $cur = new DateTime(max($rr['data_inicio'], $first_day));
+        $end = new DateTime(min($rr['data_fim'], $last_day));
+        $end->modify('+1 day');
+        while ($cur < $end) {
+            $dow = $cur->format('N');
+            if (in_array($dow, $dias_arr)) {
+                $d = $cur->format('Y-m-d');
+                $reserva_data[$rr['professor_id']][$d] = [
+                    'gestor' => $rr['gestor_nome'],
+                    'own' => ($rr['usuario_id'] == $auth_user_id),
+                    'hora' => $rr['hora_inicio'] . '-' . $rr['hora_fim'],
+                    'notas' => $rr['notas']
+                ];
+            }
+            $cur->modify('+1 day');
+        }
+    }
+}
+$can_reserve = can_edit(); // gestor or admin
 ?>
 
 <style>
@@ -469,24 +638,99 @@ $all_especialidades_modal = $mysqli->query("SELECT DISTINCT especialidade FROM p
     .modal-content { background: var(--card-bg); margin: 3% auto; padding: 35px; border-radius: 20px; box-shadow: 0 10px 50px rgba(0,0,0,0.3); border: 1px solid var(--border-color); position: relative; }
     .close-modal { position: absolute; top: 20px; right: 25px; font-size: 1.8rem; cursor: pointer; color: var(--text-muted); transition: color 0.2s; }
     .close-modal:hover { color: var(--primary-red); }
+
+    /* ── Modo Reserva (Reservation Mode) ── */
+    .bar-seg-reserved { background: linear-gradient(135deg, #1565c0, #0d47a1); color: #fff; cursor: help; position: relative; }
+    .bar-seg-reserved:hover { filter: brightness(1.15); }
+    .bar-seg-reserved-own { background: linear-gradient(135deg, #2e7d32, #1b5e20); color: #fff; cursor: pointer; }
+    .bar-seg-reserved-own:hover { filter: brightness(1.2); }
+    .bar-seg-selectable { cursor: crosshair !important; }
+    .bar-seg-selectable:hover { filter: brightness(1.3) !important; box-shadow: 0 0 10px rgba(46,125,50,0.5); }
+    .bar-seg-selected { background: #1565c0 !important; color: #fff !important; box-shadow: inset 0 0 0 2px #0d47a1; animation: reserva-pulse 1.2s ease-in-out infinite; }
+    @keyframes reserva-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.8; }
+    }
+
+    .calendar-day-reserved { background: linear-gradient(135deg, #1565c0, #1976d2); color: #fff; border-color: #0d47a1; cursor: help; }
+    .calendar-day-reserved:hover { filter: brightness(1.1); transform: translateY(-3px) scale(1.02); z-index: 2; box-shadow: 0 8px 20px rgba(21,101,192,0.3); }
+    .calendar-day-reserved-own { background: linear-gradient(135deg, #2e7d32, #388e3c); color: #fff; border-color: #1b5e20; cursor: pointer; }
+    .calendar-day-selected-reserva { background: #1565c0 !important; color: #fff !important; border-color: #0d47a1 !important; box-shadow: 0 0 12px rgba(21,101,192,0.5); }
+
+    .sem-day-reserved { background: #1565c0; color: #fff; cursor: help; }
+    .sem-day-reserved:hover { filter: brightness(1.1); }
+    .sem-day-reserved-own { background: #2e7d32; color: #fff; }
+
+    .block-seg-reserved { background: linear-gradient(135deg, #1565c0, #0d47a1); color: #fff; }
+    .block-seg-reserved-own { background: linear-gradient(135deg, #2e7d32, #1b5e20); color: #fff; }
+
+    .reserva-toggle-btn {
+        display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px;
+        border-radius: 10px; border: 2px solid #1565c0; background: transparent;
+        color: #1565c0; font-weight: 700; font-size: 0.88rem; cursor: pointer;
+        transition: all 0.3s; position: relative; overflow: hidden;
+    }
+    .reserva-toggle-btn:hover { background: rgba(21,101,192,0.08); }
+    .reserva-toggle-btn.active {
+        background: #1565c0; color: #fff; border-color: #0d47a1;
+        box-shadow: 0 4px 15px rgba(21,101,192,0.3);
+    }
+    .reserva-toggle-btn.active:hover { background: #0d47a1; }
+
+    .reserva-floating-bar {
+        position: fixed; bottom: -80px; left: 50%; transform: translateX(-50%);
+        background: var(--card-bg); border: 2px solid #1565c0; border-radius: 16px;
+        padding: 14px 25px; display: flex; align-items: center; gap: 16px;
+        box-shadow: 0 -4px 30px rgba(0,0,0,0.15); z-index: 1500;
+        transition: bottom 0.4s cubic-bezier(0.4, 0, 0.2, 1); min-width: 400px;
+    }
+    .reserva-floating-bar.visible { bottom: 30px; }
+    .reserva-floating-bar .rf-count { font-weight: 800; font-size: 1.1rem; color: #1565c0; }
+    .reserva-floating-bar .rf-info { font-size: 0.82rem; color: var(--text-muted); }
+    .reserva-floating-bar .rf-confirm {
+        padding: 10px 22px; border-radius: 10px; border: none;
+        background: #1565c0; color: #fff; font-weight: 700; font-size: 0.88rem;
+        cursor: pointer; transition: all 0.2s;
+    }
+    .reserva-floating-bar .rf-confirm:hover { background: #0d47a1; box-shadow: 0 4px 12px rgba(21,101,192,0.4); }
+    .reserva-floating-bar .rf-cancel {
+        padding: 10px 18px; border-radius: 10px; border: 1px solid var(--border-color);
+        background: transparent; color: var(--text-muted); font-weight: 600; cursor: pointer;
+    }
+    .reserva-floating-bar .rf-cancel:hover { background: rgba(229,57,53,0.06); color: #c62828; border-color: #c62828; }
+
+    .reserva-badge {
+        display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+        border-radius: 6px; font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.5px; white-space: nowrap;
+    }
+    .reserva-badge-other { background: rgba(21,101,192,0.15); color: #0d47a1; }
+    .reserva-badge-own { background: rgba(46,125,50,0.15); color: #1b5e20; }
 </style>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
     <div>
         <h2><i class="fas fa-calendar-check"></i> Agenda de Professores</h2>
-        <div class="view-selector" style="margin-top: 10px;">
-            <a href="?view_mode=timeline&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'timeline' ? 'active' : ''; ?>">
-                <i class="fas fa-grip-lines"></i> Timeline
-            </a>
-            <a href="?view_mode=blocks&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'blocks' ? 'active' : ''; ?>">
-                <i class="fas fa-layer-group"></i> Blocos
-            </a>
-            <a href="?view_mode=calendar&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'calendar' ? 'active' : ''; ?>">
-                <i class="fas fa-th-large"></i> Calendário
-            </a>
-            <a href="?view_mode=semestral&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'semestral' ? 'active' : ''; ?>">
-                <i class="fas fa-calendar-week"></i> Semestral
-            </a>
+        <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px;">
+            <div class="view-selector">
+                <a href="?view_mode=timeline&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'timeline' ? 'active' : ''; ?>">
+                    <i class="fas fa-grip-lines"></i> Timeline
+                </a>
+                <a href="?view_mode=blocks&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'blocks' ? 'active' : ''; ?>">
+                    <i class="fas fa-layer-group"></i> Blocos
+                </a>
+                <a href="?view_mode=calendar&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'calendar' ? 'active' : ''; ?>">
+                    <i class="fas fa-th-large"></i> Calendário
+                </a>
+                <a href="?view_mode=semestral&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'semestral' ? 'active' : ''; ?>">
+                    <i class="fas fa-calendar-week"></i> Semestral
+                </a>
+            </div>
+            <?php if ($can_reserve): ?>
+            <button id="reservaModeToggle" class="reserva-toggle-btn" onclick="toggleReservaMode()">
+                <i class="fas fa-bookmark"></i> <span id="reservaModeLabel">Modo Reserva</span>
+            </button>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -707,6 +951,7 @@ else: ?>
                     $is_sunday = ($ddow == 7);
                     $is_saturday = ($ddow == 6);
                     $is_busy = isset($sem_busy[$ddt]);
+                    $is_reserved_s = isset($reserva_data[$p['id']][$ddt]) ? $reserva_data[$p['id']][$ddt] : false;
 
                     // Check partial (has turnos but not all blocked)
                     $st = isset($sem_turno[$ddt]) ? $sem_turno[$ddt] : null;
@@ -716,6 +961,10 @@ else: ?>
                     $cell_class = 'sem-day-free';
                     if ($is_sunday)
                         $cell_class = 'sem-day-sunday';
+                    elseif ($is_reserved_s && !$is_reserved_s['own'])
+                        $cell_class = 'sem-day-reserved';
+                    elseif ($is_reserved_s && $is_reserved_s['own'])
+                        $cell_class = 'sem-day-reserved-own';
                     elseif ($is_busy && $is_partial_sem)
                         $cell_class = 'sem-day-partial';
                     elseif ($is_busy)
@@ -723,12 +972,16 @@ else: ?>
                     elseif ($is_saturday)
                         $cell_class = 'sem-day-weekend';
 
-                    $tip = $dd . ' ' . $months_pt_sem[$m] . ' - ' . ($is_busy ? htmlspecialchars($sem_busy[$ddt]) . ($is_partial_sem ? ' (parcial)' : '') : ($is_sunday ? 'Domingo' : 'Livre'));
-                    $clickable = (!$is_sunday && (!$is_busy || $is_partial_sem));
+                    if ($is_reserved_s) {
+                        $tip = $dd . ' ' . $months_pt_sem[$m] . ' - RESERVADO (' . htmlspecialchars($is_reserved_s['gestor']) . ')';
+                    } else {
+                        $tip = $dd . ' ' . $months_pt_sem[$m] . ' - ' . ($is_busy ? htmlspecialchars($sem_busy[$ddt]) . ($is_partial_sem ? ' (parcial)' : '') : ($is_sunday ? 'Domingo' : 'Livre'));
+                    }
+                    $clickable = (!$is_sunday && (!$is_busy || $is_partial_sem) && !($is_reserved_s && !$is_reserved_s['own']));
 ?>
                                     <div class="sem-day <?php echo $cell_class; ?>"
                                          title="<?php echo $tip; ?>"
-                                         <?php if ($clickable): ?>onclick="openScheduleModal(<?php echo $p['id']; ?>, '<?php echo addslashes($p['nome']); ?>', '<?php echo $ddt; ?>')"<?php
+                                         <?php if ($clickable): ?>onclick="handleBarClick(<?php echo $p['id']; ?>, '<?php echo addslashes($p['nome']); ?>', '<?php echo $ddt; ?>', this)"<?php
                     endif; ?>>
                                         <?php echo $dd; ?>
                                     </div>
@@ -809,6 +1062,7 @@ else: ?>
                 $dt = sprintf("%s-%02d", $current_month, $i);
                 $dow = date('N', strtotime($dt));
                 $is_busy = isset($agenda_data[$p['id']][$dt]) ? $agenda_data[$p['id']][$dt] : false;
+                $is_reserved_b = isset($reserva_data[$p['id']][$dt]) ? $reserva_data[$p['id']][$dt] : false;
                 $td_info2 = isset($turno_detail[$p['id']][$dt]) ? $turno_detail[$p['id']][$dt] : null;
                 $b_m = $td_info2 && $td_info2['M'];
                 $b_t = $td_info2 && $td_info2['T'];
@@ -819,6 +1073,14 @@ else: ?>
                 if ($dow == 7) {
                     $status = 'sunday';
                     $label = 'Bloqueado';
+                }
+                elseif ($is_reserved_b && !$is_reserved_b['own']) {
+                    $status = 'reserved';
+                    $label = 'Reservado (' . $is_reserved_b['gestor'] . ')';
+                }
+                elseif ($is_reserved_b && $is_reserved_b['own']) {
+                    $status = 'reserved_own';
+                    $label = 'Minha Reserva';
                 }
                 elseif ($is_busy && $b_partial) {
                     $status = 'partial:' . $is_busy;
@@ -855,6 +1117,12 @@ else: ?>
                 elseif (strpos($block['status'], 'partial:') === 0) {
                     $bclass = 'block-seg-partial';
                 }
+                elseif ($block['status'] === 'reserved') {
+                    $bclass = 'block-seg-reserved';
+                }
+                elseif ($block['status'] === 'reserved_own') {
+                    $bclass = 'block-seg-reserved-own';
+                }
                 elseif ($block['status'] === 'sunday') {
                     $bclass = 'block-seg-sunday';
                 }
@@ -862,10 +1130,10 @@ else: ?>
                     $bclass = 'block-seg-free';
                 }
                 $first_dt = sprintf("%s-%02d", $current_month, $block['start']);
-                $is_clickable = ($block['status'] === 'free' || strpos($block['status'], 'partial:') === 0);
+                $is_clickable = ($block['status'] === 'free' || strpos($block['status'], 'partial:') === 0 || $block['status'] === 'reserved_own');
 ?>
                         <div class="block-seg <?php echo $bclass; ?>" style="flex: <?php echo $block['count']; ?>;" title="<?php echo $range_text; ?>: <?php echo htmlspecialchars($block['label']); ?>"
-                             <?php if ($is_clickable): ?>onclick="openScheduleModal(<?php echo $p['id']; ?>, '<?php echo addslashes($p['nome']); ?>', '<?php echo $first_dt; ?>')"<?php
+                             <?php if ($is_clickable): ?>onclick="handleBarClick(<?php echo $p['id']; ?>, '<?php echo addslashes($p['nome']); ?>', '<?php echo $first_dt; ?>', this)"<?php
                 endif; ?>>
                             <span class="block-range"><?php echo $range_text; ?></span>
                             <span class="block-label"><?php echo htmlspecialchars($block['label']); ?></span>
@@ -902,6 +1170,7 @@ else: ?>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#f9a825;border-radius:1px;"></span> Parcial</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#e53935;border-radius:1px;"></span> Ocup.</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#e0e0e0;border-radius:1px;"></span> Bloq.</span>
+                        <span><span style="display:inline-block;width:8px;height:8px;background:linear-gradient(135deg,#1565c0,#0d47a1);border-radius:1px;"></span> Reserv.</span>
                     </span>
                 </div>
 
@@ -974,6 +1243,7 @@ else: ?>
                 $dow = date('N', strtotime($dt));
                 $is_busy = isset($agenda_data[$p['id']][$dt]) ? $agenda_data[$p['id']][$dt] : false;
                 $td_info = isset($turno_detail[$p['id']][$dt]) ? $turno_detail[$p['id']][$dt] : null;
+                $is_reserved = isset($reserva_data[$p['id']][$dt]) ? $reserva_data[$p['id']][$dt] : false;
 
                 // Determine if partially occupied (has some turnos free)
                 $has_m = $td_info && $td_info['M'];
@@ -984,18 +1254,30 @@ else: ?>
 
                 $class = "bar-seg-free";
                 $title = "Livre: " . $i;
-                $onclick = "onclick=\"openScheduleModal({$p['id']}, '" . addslashes($p['nome']) . "', '{$dt}')\"";
+                $p_name_js = addslashes($p['nome']);
+                $onclick = "onclick=\"handleBarClick({$p['id']}, '{$p_name_js}', '{$dt}', this)\"";
 
                 if ($dow == 7) {
                     $class = "bar-seg-sunday";
                     $title = "DOMINGO: " . $i;
                     $onclick = "";
                 }
+                elseif ($is_reserved && !$is_reserved['own']) {
+                    // Reserved by another gestor
+                    $class = "bar-seg-reserved";
+                    $res_gestor = htmlspecialchars($is_reserved['gestor']);
+                    $title = "RESERVADO por {$res_gestor} ({$is_reserved['hora']}) — Dia $i";
+                    $onclick = "";
+                }
+                elseif ($is_reserved && $is_reserved['own']) {
+                    // Reserved by current user
+                    $class = "bar-seg-reserved-own";
+                    $title = "MINHA RESERVA ({$is_reserved['hora']}) — Dia $i — Clique p/ agendar";
+                }
                 elseif ($is_busy && $is_partial) {
                     $class = "bar-seg-partial";
                     $turnos_str = ($has_m ? 'M' : '') . ($has_t ? 'T' : '') . ($has_n ? 'N' : '');
                     $title = "PARCIAL [$turnos_str]: $is_busy (Dia $i) — Clique p/ agendar outro turno";
-                // still clickable
                 }
                 elseif ($is_busy) {
                     $class = "bar-seg-busy";
@@ -1007,8 +1289,13 @@ else: ?>
                     $title = "Sábado: " . $i;
                 }
 ?>
-                        <div class="bar-seg <?php echo $class; ?>" title="<?php echo $title; ?>" <?php echo $onclick; ?>>
+                        <div class="bar-seg <?php echo $class; ?>" title="<?php echo $title; ?>" <?php echo $onclick; ?> data-date="<?php echo $dt; ?>" data-prof="<?php echo $p['id']; ?>">
                             <?php echo $i; ?>
+                            <?php if ($is_reserved): ?>
+                            <span class="reserva-badge <?php echo $is_reserved['own'] ? 'reserva-badge-own' : 'reserva-badge-other'; ?>" style="position:absolute;bottom:1px;font-size:0.45rem;padding:0 3px;">
+                                <i class="fas fa-bookmark"></i>
+                            </span>
+                            <?php endif; ?>
                         </div>
                     <?php
             endfor; ?>
@@ -1042,6 +1329,7 @@ else: ?>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#f9a825;border-radius:1px;"></span> Parcial</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#e53935;border-radius:1px;"></span> Ocup.</span>
                         <span><span style="display:inline-block;width:8px;height:8px;background:#e0e0e0;border-radius:1px;"></span> Bloq.</span>
+                        <span><span style="display:inline-block;width:8px;height:8px;background:linear-gradient(135deg,#1565c0,#0d47a1);border-radius:1px;"></span> Reserv.</span>
                     </span>
                 </div>
 
@@ -1092,6 +1380,7 @@ endif; ?>
             <div class="legend-item"><div class="legend-box" style="background:#ff1c1c;"></div><span>Ocupado</span></div>
             <div class="legend-item"><div class="legend-box calendar-day-weekend" style="border:1px solid #ccc;"></div><span>Sábado (Livre)</span></div>
             <div class="legend-item"><div class="legend-box calendar-day-weekendd" style="background:#ffcdd2;"></div><span>Domingo (Bloqueado)</span></div>
+            <div class="legend-item"><div class="legend-box" style="background:linear-gradient(135deg,#1565c0,#0d47a1);"></div><span>Reservado</span></div>
             <div class="legend-item" style="margin-left:10px;">
                 <span style="display:flex;gap:2px;">
                     <span style="width:10px;height:6px;border-radius:2px;background:#e53935;display:block;"></span>
@@ -1286,11 +1575,236 @@ endforeach; ?>
     </div>
 </div>
 
+<!-- FLOATING BAR: Reservation Selection -->
+<?php if ($can_reserve): ?>
+<div id="reservaFloatingBar" class="reserva-floating-bar">
+    <div>
+        <div class="rf-count"><i class="fas fa-bookmark"></i> <span id="rfSelectedCount">0</span> dia(s)</div>
+        <div class="rf-info">selecionados para <strong id="rfProfName">-</strong></div>
+    </div>
+    <div style="flex:1;"></div>
+    <button class="rf-cancel" onclick="cancelReservaSelection()"><i class="fas fa-times"></i> Cancelar</button>
+    <button class="rf-confirm" onclick="openReservaConfirmModal()"><i class="fas fa-check"></i> Confirmar Reserva</button>
+</div>
+
+<!-- MODAL 3: Confirmar Reserva -->
+<div id="reservaModal" class="modal">
+    <div class="modal-content" style="max-width: 550px;">
+        <span class="close-modal" onclick="closeModal('reservaModal')">&times;</span>
+        <h2 style="margin-bottom: 15px;"><i class="fas fa-bookmark" style="color: #1565c0;"></i> Confirmar Reserva</h2>
+        
+        <div style="background: rgba(21,101,192,0.05); padding: 15px; border-radius: 10px; border-left: 4px solid #1565c0; margin-bottom: 20px;">
+            <p id="reserva_summary" style="font-weight: 700; color: #1565c0; font-size: 0.92rem;"></p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Horário Início</label>
+                <input type="time" id="reserva_hora_inicio" value="08:00" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Horário Fim</label>
+                <input type="time" id="reserva_hora_fim" value="12:00" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
+            </div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Notas (Opcional)</label>
+            <textarea id="reserva_notas" rows="3" placeholder="Motivo da reserva, observações..." style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color); resize: vertical;"></textarea>
+        </div>
+
+        <div id="reserva_error" style="display:none; padding: 12px; background: rgba(229,57,53,0.06); border-radius: 8px; border-left: 4px solid #e53935; margin-bottom: 15px; color: #c62828; font-size: 0.88rem;"></div>
+
+        <div style="text-align: right; border-top: 1px solid var(--border-color); padding-top: 20px;">
+            <button type="button" class="btn" onclick="closeModal('reservaModal')" style="padding: 12px 25px; margin-right: 10px;">Cancelar</button>
+            <button type="button" id="reservaConfirmBtn" class="btn btn-primary" onclick="submitReserva()" style="padding: 12px 35px; background: #1565c0; border-color: #0d47a1;">
+                <i class="fas fa-bookmark"></i> Reservar Professor
+            </button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <script>
 const currentMonthStart = "<?php echo $current_month; ?>";
 let currentProfId = null;
 let currentProfNome = "";
 let currentViewMonth = "<?php echo $current_month; ?>";
+
+// ── Reservation Mode State ──
+let reservaModeActive = false;
+let reservaSelectedDates = []; // [{date, profId, profNome}]
+let reservaCurrentProfId = null;
+let reservaCurrentProfNome = "";
+
+// Pass PHP reservation data to JS
+const pageReservaData = <?php echo json_encode($reserva_data); ?>;
+const canReserve = <?php echo $can_reserve ? 'true' : 'false'; ?>;
+
+function toggleReservaMode() {
+    reservaModeActive = !reservaModeActive;
+    const btn = document.getElementById('reservaModeToggle');
+    const label = document.getElementById('reservaModeLabel');
+    if (reservaModeActive) {
+        btn.classList.add('active');
+        label.textContent = 'Sair do Modo Reserva';
+        reservaSelectedDates = [];
+        reservaCurrentProfId = null;
+        reservaCurrentProfNome = "";
+        updateFloatingBar();
+    } else {
+        btn.classList.remove('active');
+        label.textContent = 'Modo Reserva';
+        reservaSelectedDates = [];
+        reservaCurrentProfId = null;
+        reservaCurrentProfNome = "";
+        updateFloatingBar();
+        // Remove selection highlights
+        document.querySelectorAll('.bar-seg-selected').forEach(el => el.classList.remove('bar-seg-selected'));
+    }
+}
+
+function handleReservaClick(profId, profNome, dateStr, element) {
+    if (!reservaModeActive) return false; // Not in reservation mode
+
+    // If different professor, reset
+    if (reservaCurrentProfId && reservaCurrentProfId !== profId) {
+        reservaSelectedDates = [];
+        document.querySelectorAll('.bar-seg-selected').forEach(el => el.classList.remove('bar-seg-selected'));
+    }
+
+    reservaCurrentProfId = profId;
+    reservaCurrentProfNome = profNome;
+
+    const idx = reservaSelectedDates.findIndex(d => d.date === dateStr);
+    if (idx >= 0) {
+        // Deselect
+        reservaSelectedDates.splice(idx, 1);
+        if (element) element.classList.remove('bar-seg-selected');
+    } else {
+        // Select
+        reservaSelectedDates.push({date: dateStr, profId, profNome});
+        if (element) element.classList.add('bar-seg-selected');
+    }
+
+    updateFloatingBar();
+    return true; // Handled
+}
+
+function updateFloatingBar() {
+    const bar = document.getElementById('reservaFloatingBar');
+    if (!bar) return;
+    
+    if (reservaModeActive && reservaSelectedDates.length > 0) {
+        bar.classList.add('visible');
+        document.getElementById('rfSelectedCount').textContent = reservaSelectedDates.length;
+        document.getElementById('rfProfName').textContent = reservaCurrentProfNome;
+    } else {
+        bar.classList.remove('visible');
+    }
+}
+
+function cancelReservaSelection() {
+    reservaSelectedDates = [];
+    document.querySelectorAll('.bar-seg-selected').forEach(el => el.classList.remove('bar-seg-selected'));
+    updateFloatingBar();
+}
+
+function openReservaConfirmModal() {
+    if (reservaSelectedDates.length === 0) return;
+
+    // Sort dates
+    const sorted = [...reservaSelectedDates].sort((a, b) => a.date.localeCompare(b.date));
+    const firstDate = sorted[0].date;
+    const lastDate = sorted[sorted.length - 1].date;
+
+    // Determine weekdays used
+    const dowSet = new Set();
+    const dowNames = {1:'Seg', 2:'Ter', 3:'Qua', 4:'Qui', 5:'Sex', 6:'Sáb'};
+    sorted.forEach(d => {
+        const dt = new Date(d.date + 'T00:00:00');
+        let dow = dt.getDay();
+        if (dow === 0) dow = 7;
+        if (dow <= 6) dowSet.add(dow);
+    });
+
+    const dowList = [...dowSet].sort();
+    const dowLabels = dowList.map(d => dowNames[d] || d);
+
+    document.getElementById('reserva_summary').innerHTML = `
+        <i class="fas fa-user"></i> Professor: <strong>${reservaCurrentProfNome}</strong><br>
+        <i class="fas fa-calendar-alt"></i> Período: ${formatDateBR(firstDate)} a ${formatDateBR(lastDate)}<br>
+        <i class="fas fa-calendar-week"></i> Dias: ${dowLabels.join(', ')} (${sorted.length} dia(s))<br>
+    `;
+
+    // Store computed data for submit
+    document.getElementById('reservaModal').dataset.profId = reservaCurrentProfId;
+    document.getElementById('reservaModal').dataset.dateStart = firstDate;
+    document.getElementById('reservaModal').dataset.dateEnd = lastDate;
+    document.getElementById('reservaModal').dataset.diasSemana = dowList.join(',');
+
+    document.getElementById('reserva_error').style.display = 'none';
+    document.getElementById('reservaModal').style.display = 'block';
+}
+
+function formatDateBR(dateStr) {
+    const [y, m, d] = dateStr.split('-');
+    return `${d}/${m}/${y}`;
+}
+
+async function submitReserva() {
+    const modal = document.getElementById('reservaModal');
+    const btn = document.getElementById('reservaConfirmBtn');
+    const errDiv = document.getElementById('reserva_error');
+    errDiv.style.display = 'none';
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Reservando...';
+
+    const formData = new FormData();
+    formData.append('ajax_create_reserva', '1');
+    formData.append('professor_id', modal.dataset.profId);
+    formData.append('data_inicio', modal.dataset.dateStart);
+    formData.append('data_fim', modal.dataset.dateEnd);
+    formData.append('dias_semana', modal.dataset.diasSemana);
+    formData.append('hora_inicio', document.getElementById('reserva_hora_inicio').value);
+    formData.append('hora_fim', document.getElementById('reserva_hora_fim').value);
+    formData.append('notas', document.getElementById('reserva_notas').value);
+
+    try {
+        const resp = await fetch('agenda_professores.php', {method: 'POST', body: formData});
+        const data = await resp.json();
+        if (data.ok) {
+            closeModal('reservaModal');
+            reservaSelectedDates = [];
+            reservaModeActive = false;
+            const toggleBtn = document.getElementById('reservaModeToggle');
+            if (toggleBtn) { toggleBtn.classList.remove('active'); }
+            const label = document.getElementById('reservaModeLabel');
+            if (label) label.textContent = 'Modo Reserva';
+            updateFloatingBar();
+            alert(data.msg || 'Reserva criada com sucesso!');
+            location.reload();
+        } else {
+            errDiv.textContent = data.error || 'Erro ao criar reserva.';
+            errDiv.style.display = 'block';
+        }
+    } catch (e) {
+        errDiv.textContent = 'Erro de rede ao criar reserva.';
+        errDiv.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-bookmark"></i> Reservar Professor';
+    }
+}
+
+// ── Click handler for timeline bars (dispatch between reservation mode and schedule mode) ──
+function handleBarClick(profId, profNome, dateStr, element) {
+    if (reservaModeActive && canReserve) {
+        handleReservaClick(profId, profNome, dateStr, element);
+    } else {
+        openScheduleModal(profId, profNome, dateStr);
+    }
+}
 
 function openTimelineModal(profId, profNome) {
     currentProfId = profId;
@@ -1331,7 +1845,7 @@ async function fetchNewAvailability() {
     try {
         const response = await fetch(`?ajax_availability=1&prof_id=${currentProfId}&month=${currentViewMonth}`);
         const data = await response.json();
-        renderCalendarView(currentProfId, currentProfNome, currentViewMonth, data.busy, 'calendar_render_area', data.turnos || {});
+        renderCalendarView(currentProfId, currentProfNome, currentViewMonth, data.busy, 'calendar_render_area', data.turnos || {}, data.reserved || {});
     } catch (e) {
         console.error(e);
         alert("Erro ao carregar dados de disponibilidade.");
@@ -1340,7 +1854,7 @@ async function fetchNewAvailability() {
     }
 }
 
-function renderCalendarView(profId, profNome, monthStr, busyDays, targetContainerId = 'calendar_render_area', turnoData = {}) {
+function renderCalendarView(profId, profNome, monthStr, busyDays, targetContainerId = 'calendar_render_area', turnoData = {}, reservedData = {}) {
     const container = document.getElementById(targetContainerId);
     
     const date = new Date(monthStr + "-01T00:00:00");
@@ -1367,6 +1881,7 @@ function renderCalendarView(profId, profNome, monthStr, busyDays, targetContaine
         const dow = dObj.getDay();
         const isBusy = busyDays[dStr];
         const turno = turnoData[dStr] || null;
+        const reserved = reservedData[dStr] || null;
         
         const isSunday = (dow === 0);
         const isSaturday = (dow === 6);
@@ -1380,12 +1895,26 @@ function renderCalendarView(profId, profNome, monthStr, busyDays, targetContaine
         const isPartial = isBusy && !allFull;
         
         let statusClass, weekendClass = '', tooltip = '', statusLabel = 'Livre', clickable = false;
+        let extraHtml = '';
         
         if (isSunday) {
             statusClass = 'calendar-day-busy';
             weekendClass = 'calendar-day-weekendd';
             tooltip = '(DOMINGO)';
             statusLabel = 'Bloqueado';
+        } else if (reserved && !reserved.own) {
+            // Reserved by another gestor
+            statusClass = 'calendar-day-reserved';
+            tooltip = `RESERVADO por ${reserved.gestor} (${reserved.hora})`;
+            statusLabel = 'Reservado';
+            extraHtml = `<div style="font-size:0.55rem;margin-top:2px;opacity:0.85;"><i class="fas fa-bookmark"></i> ${reserved.gestor}</div>`;
+        } else if (reserved && reserved.own) {
+            // My reservation - can click to schedule
+            statusClass = 'calendar-day-reserved-own';
+            tooltip = `MINHA RESERVA (${reserved.hora}) — Clique p/ agendar`;
+            statusLabel = 'Reservado';
+            clickable = true;
+            extraHtml = `<div style="font-size:0.55rem;margin-top:2px;opacity:0.85;"><i class="fas fa-bookmark"></i> Minha</div>`;
         } else if (isBusy && isPartial) {
             statusClass = 'calendar-day-partial';
             weekendClass = '';
@@ -1418,13 +1947,20 @@ function renderCalendarView(profId, profNome, monthStr, busyDays, targetContaine
             </div>`;
         }
         
+        // Click handler depends on reservation mode
+        let clickHandler = '';
+        if (clickable) {
+            clickHandler = `onclick="handleBarClick(${profId}, '${profNome}', '${dStr}', this)"`;
+        }
+        
         html += `
             <div class="calendar-day ${statusClass} ${weekendClass}" 
-                 ${clickable ? `onclick="openScheduleModal(${profId}, '${profNome}', '${dStr}')"` : ''}
-                 title="${tooltip}">
+                 ${clickHandler}
+                 title="${tooltip}" data-date="${dStr}">
                 <div class="day-number">${i}</div>
                 <div class="day-status-label">${statusLabel}</div>
                 ${turnoHtml}
+                ${extraHtml}
             </div>`;
     }
     
@@ -1707,7 +2243,16 @@ else {
     echo '{}';
 }
 ?>;
-            renderCalendarView(profId, profNome, currentMonthStart, busyData, 'inline_calendar_' + profId, turnoData);
+            const reservaDataInline = <?php
+if (!empty($professores)) {
+    $pid0 = $professores[0]['id'];
+    echo json_encode($reserva_data[$pid0] ?? []);
+}
+else {
+    echo '{}';
+}
+?>;
+            renderCalendarView(profId, profNome, currentMonthStart, busyData, 'inline_calendar_' + profId, turnoData, reservaDataInline);
         }
     }
 });
