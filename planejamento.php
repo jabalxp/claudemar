@@ -8,8 +8,11 @@ include 'includes/header.php';
 // Fetch Turmas with Curso Name
 $turmas = $mysqli->query("SELECT t.id, t.nome, c.nome as curso_nome, t.data_inicio, t.data_fim, t.turno FROM turmas t JOIN cursos c ON t.curso_id = c.id ORDER BY t.data_inicio DESC")->fetch_all(MYSQLI_ASSOC);
 
-// Fetch Professors
-$professores = $mysqli->query("SELECT id, nome FROM professores ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
+// Fetch Professors (with specialty)
+$professores = $mysqli->query("SELECT id, nome, especialidade FROM professores ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
+
+// Fetch distinct specialties
+$especialidades_plan = $mysqli->query("SELECT DISTINCT especialidade FROM professores WHERE especialidade IS NOT NULL AND especialidade != '' ORDER BY especialidade ASC")->fetch_all(MYSQLI_ASSOC);
 
 // Fetch Rooms
 $salas = $mysqli->query("SELECT id, nome FROM salas ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
@@ -43,30 +46,43 @@ endforeach; ?>
             <!-- Professors Selection -->
             <div>
                 <label style="display: block; margin-bottom: 5px; font-weight: 600;">Professores Responsáveis (Até 4)</label>
+                
+                <!-- Filtro Especialidade -->
+                <div style="margin-bottom: 8px;">
+                    <select id="plan_especialidade_filter" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px dashed var(--border-color); background: var(--bg-color); color: var(--text-color); font-weight: 600; font-size: 0.85rem;">
+                        <option value="">Filtrar por Especialidade...</option>
+                        <?php foreach ($especialidades_plan as $esp_p): ?>
+                            <option value="<?php echo htmlspecialchars($esp_p['especialidade']); ?>">
+                                <?php echo htmlspecialchars($esp_p['especialidade']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                
                 <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <select name="professor_id" required style="width: 100%; padding: 12px; border-radius: 6px; border: 2px solid var(--primary-red); background: var(--card-bg); color: var(--text-color); font-weight: 600;">
+                    <select name="professor_id" required class="plan-prof-select" style="width: 100%; padding: 12px; border-radius: 6px; border: 2px solid var(--primary-red); background: var(--card-bg); color: var(--text-color); font-weight: 600;">
                         <option value="">1º Professor (Obrigatório)...</option>
                         <?php foreach ($professores as $p): ?>
-                            <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                            <option value="<?php echo $p['id']; ?>" data-especialidade="<?php echo htmlspecialchars($p['especialidade']); ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
                         <?php endforeach; ?>
                     </select>
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-                        <select name="professor_id_2" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
+                        <select name="professor_id_2" class="plan-prof-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
                             <option value="">2º Prof. (Opcional)</option>
                             <?php foreach ($professores as $p): ?>
-                                <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                                <option value="<?php echo $p['id']; ?>" data-especialidade="<?php echo htmlspecialchars($p['especialidade']); ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <select name="professor_id_3" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
+                        <select name="professor_id_3" class="plan-prof-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
                             <option value="">3º Prof. (Opcional)</option>
                             <?php foreach ($professores as $p): ?>
-                                <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                                <option value="<?php echo $p['id']; ?>" data-especialidade="<?php echo htmlspecialchars($p['especialidade']); ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <select name="professor_id_4" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
+                        <select name="professor_id_4" class="plan-prof-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 0.9rem;">
                             <option value="">4º Prof. (Opcional)</option>
                             <?php foreach ($professores as $p): ?>
-                                <option value="<?php echo $p['id']; ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
+                                <option value="<?php echo $p['id']; ?>" data-especialidade="<?php echo htmlspecialchars($p['especialidade']); ?>"><?php echo htmlspecialchars($p['nome']); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -158,6 +174,33 @@ document.getElementById('turma_select').addEventListener('change', function() {
             document.getElementById('hora_fim').value = '22:30';
         }
     }
+});
+
+// Specialty cascade filter for planejamento page
+document.getElementById('plan_especialidade_filter').addEventListener('change', function() {
+    const selectedEsp = this.value;
+    const allSelects = document.querySelectorAll('.plan-prof-select');
+    
+    allSelects.forEach(select => {
+        const currentVal = select.value;
+        const options = select.querySelectorAll('option');
+        
+        options.forEach(opt => {
+            if (!opt.value) return;
+            const optEsp = opt.getAttribute('data-especialidade') || '';
+            
+            if (selectedEsp === '' || optEsp === selectedEsp) {
+                opt.style.display = '';
+                opt.disabled = false;
+            } else {
+                opt.style.display = 'none';
+                opt.disabled = true;
+                if (opt.value === currentVal) {
+                    select.value = '';
+                }
+            }
+        });
+    });
 });
 </script>
 

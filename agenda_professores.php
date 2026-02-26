@@ -3,6 +3,111 @@
 require_once 'includes/db.php';
 require_once 'includes/auth.php';
 
+// --- AJAX HANDLER FOR WEEKDAY BLOCKING (Turno-Aware) ---
+if (isset($_GET['ajax_weekday_check'])) {
+    $prof_id = (int)$_GET['prof_id'];
+    $date_start = $_GET['date_start'];
+    $date_end = $_GET['date_end'];
+    $hora_inicio = $_GET['hora_inicio'];
+    $hora_fim = $_GET['hora_fim'];
+
+    // Get ALL classes for this professor in the date range (no time filter)
+    $st = $mysqli->prepare("
+        SELECT DAYOFWEEK(a.data) as dow, a.data, a.hora_inicio, a.hora_fim
+        FROM agenda a
+        WHERE (a.professor_id = ? OR a.professor_id_2 = ? OR a.professor_id_3 = ? OR a.professor_id_4 = ?)
+        AND a.data BETWEEN ? AND ?
+    ");
+    $st->bind_param('iiiiss', $prof_id, $prof_id, $prof_id, $prof_id, $date_start, $date_end);
+    $st->execute();
+    $results = $st->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    // MySQL DAYOFWEEK: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
+    // Our checkboxes: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    $date_turnos = []; // dow => date => ['M'=>bool, 'T'=>bool, 'N'=>bool]
+    $blocked = []; // dow => count of time-conflicting entries
+
+    foreach ($results as $row) {
+        $mysql_dow = (int)$row['dow'];
+        if ($mysql_dow < 2)
+            continue; // Skip Sunday
+        $our_dow = $mysql_dow - 1; // 2→1, 3→2, 4→3, 5→4, 6→5, 7→6
+
+        $hi = $row['hora_inicio'];
+        $hf = $row['hora_fim'];
+        $dt = $row['data'];
+
+        // Track turno per date per weekday
+        if (!isset($date_turnos[$our_dow][$dt])) {
+            $date_turnos[$our_dow][$dt] = ['M' => false, 'T' => false, 'N' => false];
+        }
+        if ($hi < '12:00:00')
+            $date_turnos[$our_dow][$dt]['M'] = true;
+        if ($hi < '18:00:00' && $hf > '12:00:00')
+            $date_turnos[$our_dow][$dt]['T'] = true;
+        if ($hf > '18:00:00' || $hi >= '18:00:00')
+            $date_turnos[$our_dow][$dt]['N'] = true;
+
+        // Check time overlap with selected hours
+        if ($hi < $hora_fim && $hf > $hora_inicio) {
+            if (!isset($blocked[$our_dow]))
+                $blocked[$our_dow] = 0;
+            $blocked[$our_dow]++;
+        }
+    }
+
+    // Aggregate turno counts per weekday
+    $turnos = [];
+    foreach ($date_turnos as $dow => $dates) {
+        $turnos[$dow] = ['M' => 0, 'T' => 0, 'N' => 0, 'total' => count($dates)];
+        foreach ($dates as $dt => $t) {
+            if ($t['M'])
+                $turnos[$dow]['M']++;
+            if ($t['T'])
+                $turnos[$dow]['T']++;
+            if ($t['N'])
+                $turnos[$dow]['N']++;
+        }
+    }
+
+    // Count total occurrences of each weekday in the date range (even if no classes)
+    $total_datas_por_dow = [];
+    $cur = new DateTime($date_start);
+    $end = new DateTime($date_end);
+    $end->modify('+1 day');
+    while ($cur < $end) {
+        $mysql_dow = (int)$cur->format('w') + 1; // PHP: 0=Sun → MySQL: 1=Sun
+        if ($mysql_dow >= 2) { // Skip Sunday
+            $our_dow = $mysql_dow - 1;
+            if (!isset($total_datas_por_dow[$our_dow]))
+                $total_datas_por_dow[$our_dow] = 0;
+            $total_datas_por_dow[$our_dow]++;
+        }
+        $cur->modify('+1 day');
+    }
+
+    header('Content-Type: application/json');
+    echo json_encode([
+        'blocked' => $blocked,
+        'turnos' => $turnos,
+        'total_datas_por_dow' => $total_datas_por_dow
+    ]);
+    exit;
+}
+
+// --- AJAX HANDLER FOR PROFESSORS BY SPECIALTY ---
+if (isset($_GET['ajax_profs_by_specialty'])) {
+    $especialidade = $_GET['especialidade'];
+    $st = $mysqli->prepare("SELECT id, nome FROM professores WHERE especialidade = ? ORDER BY nome ASC");
+    $st->bind_param('s', $especialidade);
+    $st->execute();
+    $profs = $st->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    header('Content-Type: application/json');
+    echo json_encode($profs);
+    exit;
+}
+
 // --- AJAX HANDLER FOR TIMELINE DATA ---
 if (isset($_GET['ajax_availability'])) {
     $prof_id = (int)$_GET['prof_id'];
@@ -46,6 +151,7 @@ include 'includes/header.php';
 
 // Filtros e Parâmetros da Tabela
 $search_name = isset($_GET['search']) ? $_GET['search'] : '';
+$filter_especialidade = isset($_GET['especialidade']) ? $_GET['especialidade'] : '';
 $ordem_disp = isset($_GET['ordem_disp']) ? $_GET['ordem_disp'] : 'mais';
 $view_mode = isset($_GET['view_mode']) ? $_GET['view_mode'] : 'timeline'; // Mode: timeline, blocks, calendar, semestral
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
@@ -57,8 +163,13 @@ $first_day = date('Y-m-01', strtotime($current_month));
 $last_day = date('Y-m-t', strtotime($current_month));
 $days_in_month = date('t', strtotime($current_month));
 
+// Fetch distinct specialties for filter dropdown
+$especialidades_result = $mysqli->query("SELECT DISTINCT especialidade FROM professores WHERE especialidade IS NOT NULL AND especialidade != '' ORDER BY especialidade ASC");
+$especialidades = $especialidades_result->fetch_all(MYSQLI_ASSOC);
+
 // SQL para Professores com busca e ordenação por disponibilidade
 $where_search = $search_name ? "AND nome LIKE ?" : "";
+$where_especialidade = $filter_especialidade ? "AND p.especialidade = ?" : "";
 $params_search = $search_name ? ["%$search_name%"] : [];
 
 $query_base = "
@@ -74,12 +185,24 @@ $query_base = "
             SELECT professor_id_4 as pid, data FROM agenda WHERE data BETWEEN '$first_day' AND '$last_day' AND professor_id_4 IS NOT NULL
         ) all_p GROUP BY pid
     ) a ON p.id = a.pid
-    WHERE 1=1 $where_search
+    WHERE 1=1 $where_search $where_especialidade
 ";
 
-$total_profs = $mysqli->prepare("SELECT COUNT(*) $query_base");
+// Build bind params for count query
+$bind_types_count = '';
+$bind_vals_count = [];
 if ($search_name) {
-    $total_profs->bind_param('s', $params_search[0]);
+    $bind_types_count .= 's';
+    $bind_vals_count[] = $params_search[0];
+}
+if ($filter_especialidade) {
+    $bind_types_count .= 's';
+    $bind_vals_count[] = $filter_especialidade;
+}
+
+$total_profs = $mysqli->prepare("SELECT COUNT(*) $query_base");
+if (!empty($bind_vals_count)) {
+    $total_profs->bind_param($bind_types_count, ...$bind_vals_count);
 }
 $total_profs->execute();
 $total_count = $total_profs->get_result()->fetch_row()[0];
@@ -92,8 +215,8 @@ $stmt_profs = $mysqli->prepare("
     $sort_sql
     LIMIT $limit OFFSET $offset
 ");
-if ($search_name) {
-    $stmt_profs->bind_param('s', $params_search[0]);
+if (!empty($bind_vals_count)) {
+    $stmt_profs->bind_param($bind_types_count, ...$bind_vals_count);
 }
 $stmt_profs->execute();
 $professores = $stmt_profs->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -171,7 +294,8 @@ if (!empty($prof_ids)) {
 // Data para os selects dos agendadores (Modais)
 $turmas_select = $mysqli->query("SELECT t.id, t.nome, c.nome as curso_nome FROM turmas t JOIN cursos c ON t.curso_id = c.id ORDER BY t.nome ASC")->fetch_all(MYSQLI_ASSOC);
 $salas_select = $mysqli->query("SELECT id, nome FROM salas ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
-$all_profs = $mysqli->query("SELECT id, nome FROM professores ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
+$all_profs = $mysqli->query("SELECT id, nome, especialidade FROM professores ORDER BY nome ASC")->fetch_all(MYSQLI_ASSOC);
+$all_especialidades_modal = $mysqli->query("SELECT DISTINCT especialidade FROM professores WHERE especialidade IS NOT NULL AND especialidade != '' ORDER BY especialidade ASC")->fetch_all(MYSQLI_ASSOC);
 ?>
 
 <style>
@@ -285,6 +409,43 @@ $all_profs = $mysqli->query("SELECT id, nome FROM professores ORDER BY nome ASC"
     .turno-pill-free { background: rgba(46,125,50,0.08); color: #2e7d32; border: 1px solid rgba(46,125,50,0.15); }
     .turno-pill-blocked { background: rgba(255,152,0,0.1); color: #e65100; border: 1px solid rgba(255,152,0,0.2); }
 
+    /* Weekday Card Blocking UI */
+    .weekday-card {
+        background: var(--card-bg); border-radius: 10px; padding: 10px 8px; border: 2px solid var(--border-color);
+        text-align: center; transition: all 0.25s ease; cursor: pointer; position: relative; min-width: 0;
+    }
+    .weekday-card:hover { border-color: #4caf50; box-shadow: 0 2px 8px rgba(76,175,80,0.15); }
+    .weekday-card.wc-blocked {
+        border-color: #e53935; background: rgba(229,57,53,0.04); opacity: 0.7;
+    }
+    .weekday-card.wc-blocked:hover { border-color: #b71c1c; box-shadow: 0 2px 8px rgba(229,57,53,0.15); }
+    .weekday-card.wc-partial-block {
+        border-color: #f9a825; background: rgba(249,168,37,0.04);
+    }
+    .weekday-card .wc-day-name { font-weight: 800; font-size: 0.88rem; margin: 4px 0 6px; }
+    .weekday-card .wc-turno-row {
+        display: flex; justify-content: center; gap: 4px; margin-top: 4px;
+    }
+    .weekday-card .wc-turno-badge {
+        display: inline-flex; align-items: center; gap: 2px; padding: 2px 6px;
+        border-radius: 10px; font-size: 0.62rem; font-weight: 700; line-height: 1.2;
+    }
+    .wc-turno-badge.wt-occupied { background: #e53935; color: #fff; }
+    .wc-turno-badge.wt-free { background: #e8f5e9; color: #2e7d32; }
+    .wc-turno-badge.wt-conflict { background: #ff6f00; color: #fff; animation: pulse-conflict 1.5s ease-in-out infinite; }
+    .weekday-card .wc-lock-icon {
+        position: absolute; top: 4px; right: 6px; font-size: 0.65rem; color: #e53935; opacity: 0;
+        transition: opacity 0.2s;
+    }
+    .weekday-card.wc-blocked .wc-lock-icon { opacity: 1; }
+    .weekday-card .wc-count {
+        font-size: 0.6rem; color: var(--text-muted); margin-top: 3px; font-weight: 600;
+    }
+    @keyframes pulse-conflict {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+
     /* Semestral Mini-Calendar */
     .sem-month-box { background: var(--bg-color); border-radius: 12px; padding: 10px 12px; border: 1px solid var(--border-color); transition: box-shadow 0.2s; }
     .sem-month-box:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
@@ -314,16 +475,16 @@ $all_profs = $mysqli->query("SELECT id, nome FROM professores ORDER BY nome ASC"
     <div>
         <h2><i class="fas fa-calendar-check"></i> Agenda de Professores</h2>
         <div class="view-selector" style="margin-top: 10px;">
-            <a href="?view_mode=timeline&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>" class="view-btn <?php echo $view_mode == 'timeline' ? 'active' : ''; ?>">
+            <a href="?view_mode=timeline&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'timeline' ? 'active' : ''; ?>">
                 <i class="fas fa-grip-lines"></i> Timeline
             </a>
-            <a href="?view_mode=blocks&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>" class="view-btn <?php echo $view_mode == 'blocks' ? 'active' : ''; ?>">
+            <a href="?view_mode=blocks&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'blocks' ? 'active' : ''; ?>">
                 <i class="fas fa-layer-group"></i> Blocos
             </a>
-            <a href="?view_mode=calendar&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>" class="view-btn <?php echo $view_mode == 'calendar' ? 'active' : ''; ?>">
+            <a href="?view_mode=calendar&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'calendar' ? 'active' : ''; ?>">
                 <i class="fas fa-th-large"></i> Calendário
             </a>
-            <a href="?view_mode=semestral&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>" class="view-btn <?php echo $view_mode == 'semestral' ? 'active' : ''; ?>">
+            <a href="?view_mode=semestral&month=<?php echo $current_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>" class="view-btn <?php echo $view_mode == 'semestral' ? 'active' : ''; ?>">
                 <i class="fas fa-calendar-week"></i> Semestral
             </a>
         </div>
@@ -358,6 +519,16 @@ if ($view_mode == 'semestral') {
             <i class="fas fa-search" style="opacity: 0.5;"></i>
             <input type="text" name="search" placeholder="Buscar por professor..." value="<?php echo htmlspecialchars($search_name); ?>" onchange="this.form.submit()" style="border:none; background:transparent; padding: 8px 5px;">
         </div>
+
+        <select name="especialidade" onchange="this.form.submit()" style="min-width: 180px;">
+            <option value="">Todas Especialidades</option>
+            <?php foreach ($especialidades as $esp): ?>
+                <option value="<?php echo htmlspecialchars($esp['especialidade']); ?>" <?php echo $filter_especialidade == $esp['especialidade'] ? 'selected' : ''; ?>>
+                    <?php echo htmlspecialchars($esp['especialidade']); ?>
+                </option>
+            <?php
+endforeach; ?>
+        </select>
         
         <select name="ordem_disp" onchange="this.form.submit()">
             <option value="mais" <?php echo $ordem_disp == 'mais' ? 'selected' : ''; ?>>Mais Disponíveis</option>
@@ -370,14 +541,14 @@ if ($view_mode == 'semestral') {
             Exibindo <?php echo count($professores); ?> de <?php echo $total_count; ?> professores
         </div>
         <div style="display: flex; align-items: center; gap: 10px;">
-            <a href="?view_mode=<?php echo $view_mode; ?>&month=<?php echo $prev_month; ?>&search=<?php echo urlencode($search_name); ?>&ordem_disp=<?php echo $ordem_disp; ?>&page=<?php echo $page; ?>" 
+            <a href="?view_mode=<?php echo $view_mode; ?>&month=<?php echo $prev_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>&ordem_disp=<?php echo $ordem_disp; ?>&page=<?php echo $page; ?>" 
                class="month-btn" title="<?php echo $view_mode == 'semestral' ? 'Semestre anterior' : 'Mês anterior'; ?>" style="width:34px; height:34px; text-decoration:none; color:var(--text-color);">
                 <i class="fas fa-chevron-left" style="font-size:0.75rem;"></i>
             </a>
             <span style="font-weight: 800; font-size: 0.95rem; min-width: <?php echo $view_mode == 'semestral' ? '220px' : '140px'; ?>; text-align: center; text-transform: capitalize; color: var(--text-color);">
                 <?php echo $month_label; ?>
             </span>
-            <a href="?view_mode=<?php echo $view_mode; ?>&month=<?php echo $next_month; ?>&search=<?php echo urlencode($search_name); ?>&ordem_disp=<?php echo $ordem_disp; ?>&page=<?php echo $page; ?>" 
+            <a href="?view_mode=<?php echo $view_mode; ?>&month=<?php echo $next_month; ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>&ordem_disp=<?php echo $ordem_disp; ?>&page=<?php echo $page; ?>" 
                class="month-btn" title="<?php echo $view_mode == 'semestral' ? 'Próximo semestre' : 'Próximo mês'; ?>" style="width:34px; height:34px; text-decoration:none; color:var(--text-color);">
                 <i class="fas fa-chevron-right" style="font-size:0.75rem;"></i>
             </a>
@@ -891,12 +1062,12 @@ if ($total_pages > 1):
 
 ?>
 <div class="pagination">
-    <a href="?page=<?php echo max(1, $page - 1); ?>&search=<?php echo urlencode($search_name); ?>&ordem_disp=<?php echo $ordem_disp; ?>&month=<?php echo $current_month; ?>&view_mode=<?php echo $view_mode; ?>" 
+    <a href="?page=<?php echo max(1, $page - 1); ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>&ordem_disp=<?php echo $ordem_disp; ?>&month=<?php echo $current_month; ?>&view_mode=<?php echo $view_mode; ?>" 
        class="btn-nav <?php echo $page <= 1 ? 'disabled' : ''; ?>">
         <i class="fas fa-chevron-left"></i>
     </a>
     <span style="font-weight: 700;">Página <?php echo $page; ?> de <?php echo $total_pages; ?></span>
-    <a href="?page=<?php echo min($total_pages, $page + 1); ?>&search=<?php echo urlencode($search_name); ?>&ordem_disp=<?php echo $ordem_disp; ?>&month=<?php echo $current_month; ?>&view_mode=<?php echo $view_mode; ?>" 
+    <a href="?page=<?php echo min($total_pages, $page + 1); ?>&search=<?php echo urlencode($search_name); ?>&especialidade=<?php echo urlencode($filter_especialidade); ?>&ordem_disp=<?php echo $ordem_disp; ?>&month=<?php echo $current_month; ?>&view_mode=<?php echo $view_mode; ?>" 
        class="btn-nav <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
         <i class="fas fa-chevron-right"></i>
     </a>
@@ -953,46 +1124,67 @@ endif; ?>
         <form action="planejamento_process.php" method="POST">
             <input type="hidden" name="is_quick" value="1">
 
-            <!-- Professores (4 campos: 1 obrigatório + 3 opcionais) -->
+            <!-- Filtro por Especialidade + Professores Cascata -->
             <div style="margin-bottom: 20px;">
                 <label style="display: block; margin-bottom: 8px; font-weight: 700; font-size: 0.95rem;">
                     <i class="fas fa-chalkboard-teacher" style="color: var(--primary-red);"></i> Professores Responsáveis
                 </label>
+
+                <!-- Filtro Especialidade no Modal -->
+                <div style="margin-bottom: 12px;">
+                    <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 3px;">
+                        <i class="fas fa-filter"></i> Filtrar por Especialidade
+                    </label>
+                    <select id="modal_especialidade_filter" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color); font-weight: 600;">
+                        <option value="">Todas as Especialidades</option>
+                        <?php foreach ($all_especialidades_modal as $esp_m): ?>
+                            <option value="<?php echo htmlspecialchars($esp_m['especialidade']); ?>">
+                                <?php echo htmlspecialchars($esp_m['especialidade']); ?>
+                            </option>
+                        <?php
+endforeach; ?>
+                    </select>
+                </div>
+
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div>
                         <label style="font-size: 0.78rem; font-weight: 600; color: var(--primary-red); display: block; margin-bottom: 3px;">1º Professor (Obrigatório)</label>
-                        <select name="professor_id" id="form_prof_id" required style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid var(--primary-red); background: var(--bg-color); color: var(--text-color); font-weight: 600;">
+                        <select name="professor_id" id="form_prof_id" required class="modal-prof-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid var(--primary-red); background: var(--bg-color); color: var(--text-color); font-weight: 600;">
                             <option value="">Selecione...</option>
                             <?php foreach ($all_profs as $ap): ?>
-                                <option value="<?php echo $ap['id']; ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
-                            <?php endforeach; ?>
+                                <option value="<?php echo $ap['id']; ?>" data-especialidade="<?php echo htmlspecialchars($ap['especialidade']); ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
+                            <?php
+endforeach; ?>
                         </select>
                     </div>
                     <div>
                         <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 3px;">2º Professor (Opcional)</label>
-                        <select name="professor_id_2" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
+                        <select name="professor_id_2" class="modal-prof-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
                             <option value="">— Nenhum —</option>
                             <?php foreach ($all_profs as $ap): ?>
-                                <option value="<?php echo $ap['id']; ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
-                            <?php endforeach; ?>
+                                <option value="<?php echo $ap['id']; ?>" data-especialidade="<?php echo htmlspecialchars($ap['especialidade']); ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
+                            <?php
+endforeach; ?>
                         </select>
                     </div>
                     <div>
                         <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 3px;">3º Professor (Opcional)</label>
-                        <select name="professor_id_3" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
+                        <select name="professor_id_3" class="modal-prof-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
                             <option value="">— Nenhum —</option>
                             <?php foreach ($all_profs as $ap): ?>
-                                <option value="<?php echo $ap['id']; ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
-                            <?php endforeach; ?>
+                                <option value="<?php echo $ap['id']; ?>" data-especialidade="<?php echo htmlspecialchars($ap['especialidade']); ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
+                            <?php
+endforeach; ?>
                         </select>
                     </div>
                     <div>
                         <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 3px;">4º Professor (Opcional)</label>
-                        <select name="professor_id_4" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
+                        <select name="professor_id_4" class="modal-prof-select" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
                             <option value="">— Nenhum —</option>
                             <?php foreach ($all_profs as $ap): ?>
-                                <option value="<?php echo $ap['id']; ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
-                            <?php endforeach; ?>
+                                <option value="<?php echo $ap['id']; ?>" data-especialidade="<?php echo htmlspecialchars($ap['especialidade']); ?>"><?php echo htmlspecialchars($ap['nome']); ?></option>
+                            <?php
+endforeach; ?>
                         </select>
                     </div>
                 </div>
@@ -1010,14 +1202,41 @@ endif; ?>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Dias da Semana (Selecione um ou mais)</label>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap; background: var(--bg-color); padding: 10px; border-radius: 8px;">
-                    <label style="cursor:pointer;"><input type="checkbox" name="dias_semana[]" value="1" checked> Seg</label> |
-                    <label style="cursor:pointer;"><input type="checkbox" name="dias_semana[]" value="2" checked> Ter</label> |
-                    <label style="cursor:pointer;"><input type="checkbox" name="dias_semana[]" value="3" checked> Qua</label> |
-                    <label style="cursor:pointer;"><input type="checkbox" name="dias_semana[]" value="4" checked> Qui</label> |
-                    <label style="cursor:pointer;"><input type="checkbox" name="dias_semana[]" value="5" checked> Sex</label> |
-                    <label style="cursor:pointer;"><input type="checkbox" name="dias_semana[]" value="6"> Sáb</label>
+                <label style="display: block; margin-bottom: 8px; font-weight: 700; font-size: 0.95rem;">
+                    <i class="fas fa-calendar-week" style="color: var(--primary-red);"></i> Dias da Semana
+                    <span style="font-size: 0.75rem; font-weight: 500; color: var(--text-muted); margin-left: 6px;">Selecione um ou mais</span>
+                </label>
+                <div id="weekday_checkboxes" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; background: var(--bg-color); padding: 12px; border-radius: 10px;">
+                    <?php
+$wk_days = [
+    1 => ['name' => 'Seg', 'full' => 'Segunda', 'checked' => true],
+    2 => ['name' => 'Ter', 'full' => 'Terça', 'checked' => true],
+    3 => ['name' => 'Qua', 'full' => 'Quarta', 'checked' => true],
+    4 => ['name' => 'Qui', 'full' => 'Quinta', 'checked' => true],
+    5 => ['name' => 'Sex', 'full' => 'Sexta', 'checked' => true],
+    6 => ['name' => 'Sáb', 'full' => 'Sábado', 'checked' => false],
+];
+foreach ($wk_days as $wd_num => $wd_info): ?>
+                    <div id="weekday_card_<?php echo $wd_num; ?>" class="weekday-card" onclick="toggleWeekdayCard(<?php echo $wd_num; ?>)">
+                        <i class="fas fa-lock wc-lock-icon"></i>
+                        <input type="checkbox" name="dias_semana[]" id="weekday_<?php echo $wd_num; ?>" value="<?php echo $wd_num; ?>" <?php echo $wd_info['checked'] ? 'checked' : ''; ?> style="margin: 0; cursor: pointer;" onclick="event.stopPropagation();">
+                        <div class="wc-day-name"><?php echo $wd_info['name']; ?></div>
+                        <div id="weekday_turno_<?php echo $wd_num; ?>" class="wc-turno-row">
+                            <!-- Turno badges will be injected by JS -->
+                        </div>
+                        <div id="weekday_count_<?php echo $wd_num; ?>" class="wc-count"></div>
+                    </div>
+                    <?php
+endforeach; ?>
+                </div>
+                <div id="weekday_blocking_info" style="display:none; margin-top: 10px; padding: 12px 16px; background: rgba(255, 152, 0, 0.06); border-radius: 10px; border-left: 4px solid #f9a825; font-size: 0.82rem; color: #e65100;">
+                    <i class="fas fa-info-circle"></i> <span id="weekday_blocking_text"></span>
+                </div>
+                <div style="display:flex; gap: 12px; margin-top: 8px; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); justify-content: center;">
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#e53935;"></span> Ocupado</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff6f00;"></span> Conflito c/ horário</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4caf50;"></span> Livre</span>
+                    <span><i class="fas fa-lock" style="font-size:0.6rem; color:#e53935;"></i> Bloqueado</span>
                 </div>
             </div>
 
@@ -1030,7 +1249,8 @@ endif; ?>
                             <option value="<?php echo $t['id']; ?>">
                                 <?php echo htmlspecialchars($t['nome']); ?>
                             </option>
-                        <?php endforeach; ?>
+                        <?php
+endforeach; ?>
                     </select>
                 </div>
                 <div>
@@ -1039,7 +1259,8 @@ endif; ?>
                         <option value="">Selecione...</option>
                         <?php foreach ($salas_select as $s): ?>
                             <option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['nome']); ?></option>
-                        <?php endforeach; ?>
+                        <?php
+endforeach; ?>
                     </select>
                 </div>
             </div>
@@ -1047,11 +1268,11 @@ endif; ?>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
                 <div>
                     <label style="display: block; margin-bottom: 5px; font-weight: 600;">Horário Início</label>
-                    <input type="time" name="hora_inicio" value="08:00" required style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
+                    <input type="time" name="hora_inicio" id="form_hora_inicio" value="08:00" required style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
                 </div>
                 <div>
                     <label style="display: block; margin-bottom: 5px; font-weight: 600;">Horário Fim</label>
-                    <input type="time" name="hora_fim" value="12:00" required style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
+                    <input type="time" name="hora_fim" id="form_hora_fim" value="12:00" required style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color);">
                 </div>
             </div>
 
@@ -1213,10 +1434,33 @@ function renderCalendarView(profId, profNome, monthStr, busyDays, targetContaine
 
 function openScheduleModal(profId, profNome, date) {
     document.getElementById('form_prof_id').value = profId;
-    document.getElementById('form_date_start').value = date;
-    document.getElementById('form_date_end').value = date;
-    document.getElementById('schedule_info').innerHTML = `<i class="fas fa-user"></i> Professor: ${profNome} <br> <i class="fas fa-calendar-alt"></i> Data Inicial selecionada: ${new Date(date + 'T00:00:00').toLocaleDateString('pt-BR')}`;
+    
+    // Calculate the week (Monday–Saturday) containing the clicked date
+    const clickedDate = new Date(date + 'T00:00:00');
+    let dow = clickedDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    if (dow === 0) dow = 7; // Treat Sunday as 7
+    
+    // Monday of this week
+    const monday = new Date(clickedDate);
+    monday.setDate(clickedDate.getDate() - (dow - 1));
+    
+    // Saturday of this week
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+    
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    const weekStart = formatDate(monday);
+    const weekEnd = formatDate(saturday);
+    
+    document.getElementById('form_date_start').value = weekStart;
+    document.getElementById('form_date_end').value = weekEnd;
+    document.getElementById('schedule_info').innerHTML = `<i class="fas fa-user"></i> Professor: ${profNome} <br> <i class="fas fa-calendar-alt"></i> Semana: ${monday.toLocaleDateString('pt-BR')} – ${saturday.toLocaleDateString('pt-BR')} <small>(clicou em ${clickedDate.toLocaleDateString('pt-BR')})</small>`;
     document.getElementById('scheduleModal').style.display = 'block';
+    
+    // Reset weekday checkboxes
+    resetWeekdayCheckboxes();
+    // Trigger blocking check for the whole week
+    checkWeekdayBlocking();
 }
 
 function closeModal(id) {
@@ -1228,6 +1472,220 @@ window.onclick = function(event) {
         event.target.style.display = 'none';
     }
 }
+
+// ==============================
+// SPECIALTY CASCADE FILTER (Modal)
+// ==============================
+document.getElementById('modal_especialidade_filter').addEventListener('change', function() {
+    const selectedEsp = this.value;
+    const allSelects = document.querySelectorAll('.modal-prof-select');
+    
+    allSelects.forEach(select => {
+        const currentVal = select.value;
+        const options = select.querySelectorAll('option');
+        
+        options.forEach(opt => {
+            if (!opt.value) return; // Skip "Selecione..." / "Nenhum"
+            const optEsp = opt.getAttribute('data-especialidade') || '';
+            
+            if (selectedEsp === '' || optEsp === selectedEsp) {
+                opt.style.display = '';
+                opt.disabled = false;
+            } else {
+                opt.style.display = 'none';
+                opt.disabled = true;
+                // If this was selected, clear it
+                if (opt.value === currentVal) {
+                    select.value = '';
+                }
+            }
+        });
+    });
+});
+
+// ==============================
+// WEEKDAY BLOCKING LOGIC (Enhanced with Turno Indicators)
+// ==============================
+const dayNames = {1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta', 6: 'Sábado'};
+const turnoLabels = {M: '☀ M', T: '☁ T', N: '☽ N'};
+const turnoFullLabels = {M: 'Manhã', T: 'Tarde', N: 'Noite'};
+
+function toggleWeekdayCard(dayNum) {
+    const cb = document.getElementById('weekday_' + dayNum);
+    if (cb && !cb.disabled) {
+        cb.checked = !cb.checked;
+    }
+}
+
+function resetWeekdayCheckboxes() {
+    for (let d = 1; d <= 6; d++) {
+        const cb = document.getElementById('weekday_' + d);
+        const card = document.getElementById('weekday_card_' + d);
+        const turnoEl = document.getElementById('weekday_turno_' + d);
+        const countEl = document.getElementById('weekday_count_' + d);
+        if (cb) {
+            cb.disabled = false;
+            cb.checked = (d <= 5); // Default: Mon-Fri checked
+        }
+        if (card) {
+            card.classList.remove('wc-blocked', 'wc-partial-block');
+            card.title = '';
+        }
+        if (turnoEl) turnoEl.innerHTML = '';
+        if (countEl) countEl.textContent = '';
+    }
+    document.getElementById('weekday_blocking_info').style.display = 'none';
+}
+
+// Determine which turno the selected time falls into
+function getSelectedTurno(horaInicio, horaFim) {
+    const result = {M: false, T: false, N: false};
+    if (horaInicio < '12:00') result.M = true;
+    if (horaInicio < '18:00' && horaFim > '12:00') result.T = true;
+    if (horaFim > '18:00' || horaInicio >= '18:00') result.N = true;
+    return result;
+}
+
+let weekdayCheckTimeout = null;
+
+async function checkWeekdayBlocking() {
+    const profId = document.getElementById('form_prof_id').value;
+    const dateStart = document.getElementById('form_date_start').value;
+    const dateEnd = document.getElementById('form_date_end').value;
+    const horaInicio = document.getElementById('form_hora_inicio').value;
+    const horaFim = document.getElementById('form_hora_fim').value;
+    
+    // Need all fields to check
+    if (!profId || !dateStart || !dateEnd || !horaInicio || !horaFim) {
+        resetWeekdayCheckboxes();
+        return;
+    }
+    
+    const selectedTurno = getSelectedTurno(horaInicio, horaFim);
+    
+    try {
+        const url = `?ajax_weekday_check=1&prof_id=${profId}&date_start=${dateStart}&date_end=${dateEnd}&hora_inicio=${horaInicio}&hora_fim=${horaFim}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        const blocked = data.blocked || {};
+        const turnos = data.turnos || {};
+        const totalDatas = data.total_datas_por_dow || {};
+        
+        let blockedNames = [];
+        let partialNames = [];
+        
+        for (let d = 1; d <= 6; d++) {
+            const cb = document.getElementById('weekday_' + d);
+            const card = document.getElementById('weekday_card_' + d);
+            const turnoEl = document.getElementById('weekday_turno_' + d);
+            const countEl = document.getElementById('weekday_count_' + d);
+            const turnoData = turnos[d] || null;
+            
+            // Reset card state
+            card.classList.remove('wc-blocked', 'wc-partial-block');
+            
+            // === TURNO-AWARE BLOCKING LOGIC ===
+            // Check if the SELECTED turno conflicts with occupied turnos for this weekday
+            let turnoConflict = false;
+            let occupiedTurnos = [];
+            let freeTurnos = [];
+            let conflictingTurnos = [];
+            
+            if (turnoData) {
+                ['M', 'T', 'N'].forEach(t => {
+                    const count = turnoData[t] || 0;
+                    if (count > 0) {
+                        occupiedTurnos.push(turnoFullLabels[t]);
+                        // Does this occupied turno conflict with what the user selected?
+                        if (selectedTurno[t]) {
+                            turnoConflict = true;
+                            conflictingTurnos.push(turnoFullLabels[t]);
+                        }
+                    } else {
+                        freeTurnos.push(turnoFullLabels[t]);
+                    }
+                });
+            }
+            
+            // Build turno badges HTML
+            let turnoHtml = '';
+            if (turnoData) {
+                ['M', 'T', 'N'].forEach(t => {
+                    const count = turnoData[t] || 0;
+                    if (count > 0) {
+                        const isConflict = selectedTurno[t];
+                        const badgeClass = isConflict ? 'wt-conflict' : 'wt-occupied';
+                        turnoHtml += `<span class="wc-turno-badge ${badgeClass}" title="${turnoFullLabels[t]}: ${count} dia(s) ocupado(s)${isConflict ? ' — CONFLITO com horário selecionado' : ''}">${turnoLabels[t]} ${count}d</span>`;
+                    } else {
+                        turnoHtml += `<span class="wc-turno-badge wt-free" title="${turnoFullLabels[t]}: Livre">${turnoLabels[t]}</span>`;
+                    }
+                });
+                countEl.textContent = `${turnoData.total} dia(s) com aula`;
+            } else {
+                turnoHtml = '<span class="wc-turno-badge wt-free">Livre</span>';
+                countEl.textContent = '';
+            }
+            
+            turnoEl.innerHTML = turnoHtml;
+            
+            // === DECISION: block or not ===
+            if (turnoConflict) {
+                // The selected turno overlaps with an occupied turno → BLOCK this weekday
+                cb.disabled = true;
+                cb.checked = false;
+                card.classList.add('wc-blocked');
+                
+                // Check if there are free turnos the user could switch to
+                const switchableTurnos = freeTurnos.filter(t => t !== ''); 
+                if (switchableTurnos.length > 0) {
+                    card.title = `${dayNames[d]} bloqueada — turno ${conflictingTurnos.join(' e ')} ocupado(s). Mude para ${switchableTurnos.join(' ou ')} para desbloquear.`;
+                    partialNames.push(dayNames[d]);
+                } else {
+                    card.title = `${dayNames[d]} totalmente ocupada — ${occupiedTurnos.join(', ')} com aulas.`;
+                }
+                blockedNames.push(dayNames[d]);
+            } else if (turnoData && turnoData.total > 0) {
+                // Has classes but NOT in the selected turno — show info, keep enabled
+                cb.disabled = false;
+                card.classList.add('wc-partial-block');
+                card.title = `${dayNames[d]} tem aulas em ${occupiedTurnos.join(' e ')}, mas o turno selecionado (${horaInicio}–${horaFim}) está livre.`;
+            } else {
+                // No classes at all — fully free
+                cb.disabled = false;
+                card.title = `${dayNames[d]} totalmente livre.`;
+            }
+        }
+        
+        const infoDiv = document.getElementById('weekday_blocking_info');
+        if (blockedNames.length > 0) {
+            let msg = `<strong>Bloqueados (${blockedNames.length}):</strong> ${blockedNames.join(', ')} — turno ${horaInicio}–${horaFim} ocupado.`;
+            if (partialNames.length > 0) {
+                msg += `<br><i class="fas fa-lightbulb" style="color:#f9a825;"></i> <strong>Dica:</strong> ${partialNames.join(', ')} ${partialNames.length > 1 ? 'têm' : 'tem'} turnos livres. Altere o horário para desbloquear.`;
+            }
+            document.getElementById('weekday_blocking_text').innerHTML = msg;
+            infoDiv.style.display = 'block';
+        } else {
+            infoDiv.style.display = 'none';
+        }
+    } catch(e) {
+        console.error('Erro ao verificar bloqueio de dias:', e);
+    }
+}
+
+function scheduleWeekdayCheck() {
+    clearTimeout(weekdayCheckTimeout);
+    weekdayCheckTimeout = setTimeout(checkWeekdayBlocking, 300);
+}
+
+// Attach listeners to the relevant fields
+document.getElementById('form_prof_id').addEventListener('change', scheduleWeekdayCheck);
+document.getElementById('form_date_start').addEventListener('change', scheduleWeekdayCheck);
+document.getElementById('form_date_end').addEventListener('change', scheduleWeekdayCheck);
+document.getElementById('form_hora_inicio').addEventListener('change', scheduleWeekdayCheck);
+document.getElementById('form_hora_fim').addEventListener('change', scheduleWeekdayCheck);
+// Also listen for input events on time fields for immediate feedback
+document.getElementById('form_hora_inicio').addEventListener('input', scheduleWeekdayCheck);
+document.getElementById('form_hora_fim').addEventListener('input', scheduleWeekdayCheck);
 
 // Inicialização automática para modo Calendário Inline
 document.addEventListener('DOMContentLoaded', () => {
